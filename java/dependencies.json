@@ -1,0 +1,10 @@
+{
+  "javaparser-core-3.27.1.jar": {
+    "url": "https://repo.maven.apache.org/maven2/com/github/javaparser/javaparser-core/3.27.1/javaparser-core-3.27.1.jar",
+    "sha256": "7ae10d11c5388060a7bf93b721600b951f5585f3782778b6d0555160680d35f8"
+  },
+  "gson-2.13.2.jar": {
+    "url": "https://repo.maven.apache.org/maven2/com/google/code/gson/gson/2.13.2/gson-2.13.2.jar",
+    "sha256": "dd0ce1b55a3ed2080cb70f9c655850cda86c206862310009dcb5e5c95265a5e0"
+  }
+}
