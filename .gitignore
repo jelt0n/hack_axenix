@@ -1,0 +1,26 @@
+# Local agent configuration
+/AGENTS.MD
+/docs/agents/issue-tracker.md
+/docs/agents/domain.md
+/docs/agents/triage-labels.md
+/docs/agents/design-notes.md
+/docs/agents/implementation-plan.md
+/docs/agents/spec.md
+/docs/agents/tickets/
+
+# Local design notes
+/GLOSSARY.md
+/docs/adr/
+
+# Development dependencies and generated files
+/.venv/
+/.cache/
+/node_modules/
+/dist/
+/.data/
+/test-results/
+/playwright-report/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.tsbuildinfo
