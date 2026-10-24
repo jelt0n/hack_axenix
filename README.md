@@ -14,6 +14,12 @@
 
 Шестой этап ([issue #7](https://github.com/jelt0n/hack_axenix/issues/7)): try/catch/finally, классы, исключения, консоль и коллекции проверены через полный путь структурной правки и исполнения. Конкретные API и ограничения перечислены в [матрице Java](docs/java-coverage.md).
 
+Финальный сценарий: [монолит на 894 строки](examples/BlueprintDemo.java),
+[пять входов и известные результаты](examples/scenarios.json),
+[пошаговое демо](docs/final-demo.md) и [итоговая матрица возможностей](docs/coverage.md).
+Он включает диагностику, правку графа, оба преобразования, экспорт, совпадение,
+намеренное различие и явную ошибку настоящего компилятора.
+
 ## Требования
 
 - Python 3.12+ и [uv](https://docs.astral.sh/uv/getting-started/installation/).
