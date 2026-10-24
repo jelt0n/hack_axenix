@@ -179,6 +179,17 @@ public final class BlueprintParser {
             return statement(body, next);
         }
 
+        Flow controlExpressions(List<Expression> expressions, Flow next) {
+            Flow first = next;
+            for (int i = expressions.size() - 1; i >= 0; i--) {
+                Expression expression = expressions.get(i);
+                String id = add("control", expression.toString(), expression);
+                connect(id, first, "");
+                first = new Flow(id, false);
+            }
+            return first;
+        }
+
         Flow statement(Statement statement, Flow next) {
             if (statement.isBlockStmt()) {
                 return block(statement.asBlockStmt(), next, "block", "Блок, строка "
@@ -204,26 +215,13 @@ public final class BlueprintParser {
             if (statement instanceof ForStmt loop) {
                 Node origin = loop.getCompare().isPresent() ? loop.getCompare().orElseThrow() : loop;
                 String condition = add("condition", loop.getCompare().map(Object::toString).orElse("true"), origin);
-                Flow update = new Flow(condition, true);
-                for (int i = loop.getUpdate().size() - 1; i >= 0; i--) {
-                    Expression expression = loop.getUpdate().get(i);
-                    String id = add("control", expression.toString(), expression);
-                    connect(id, update, "");
-                    update = new Flow(id, false);
-                }
+                Flow update = controlExpressions(loop.getUpdate(), new Flow(condition, true));
                 controls.push(new Control(next, update));
                 Flow body = loopBody(loop, update, "for");
                 controls.pop();
                 connect(condition, body, "Да");
                 if (loop.getCompare().isPresent()) connect(condition, next, "Нет");
-                Flow first = new Flow(condition, false);
-                for (int i = loop.getInitialization().size() - 1; i >= 0; i--) {
-                    Expression expression = loop.getInitialization().get(i);
-                    String id = add("control", expression.toString(), expression);
-                    connect(id, first, "");
-                    first = new Flow(id, false);
-                }
-                return first;
+                return controlExpressions(loop.getInitialization(), new Flow(condition, false));
             }
             if (statement instanceof DoStmt loop) {
                 String condition = add("condition", loop.getCondition().toString(), loop.getCondition());
