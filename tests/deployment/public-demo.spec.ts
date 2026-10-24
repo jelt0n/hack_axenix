@@ -1,5 +1,21 @@
 import { expect, test } from '@playwright/test';
 
+test('public proxy accepts a full-size Java file after JSON escaping', async ({ request }) => {
+  const declaration = 'class A {} //';
+  let source = declaration + 'ж'.repeat(Math.floor((256000 - Buffer.byteLength(declaration)) / 2));
+  source += ' '.repeat(256000 - Buffer.byteLength(source));
+  const escapedJson = JSON.stringify({ filename: 'A.java', source }).replace(/ж/g, '\\u0436');
+  const imported = await request.post('/api/projects', {
+    data: escapedJson, headers: { 'content-type': 'application/json' },
+  });
+  expect(imported.status()).toBe(201);
+  expect((await imported.json()).originalSource).toBe(source);
+
+  const oversized = await request.post('/api/projects', { data: { filename: 'A.java', source: source + ' ' } });
+  expect(oversized.status()).toBe(422);
+  expect(oversized.headers()['content-type']).toContain('application/json');
+});
+
 test('public proxy preserves sessions, runs Java and keeps the queue responsive', async ({ browser, baseURL }) => {
   const first = await browser.newContext({ baseURL });
   const second = await browser.newContext({ baseURL });

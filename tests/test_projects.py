@@ -1,3 +1,5 @@
+import json
+
 from fastapi.testclient import TestClient
 
 from backend.app import create_app
@@ -22,6 +24,33 @@ public class Orders {
     }
 }
 """
+
+
+def test_import_respects_utf8_limit_with_escaped_json_and_rejects_oversized_text(tmp_path):
+    declaration = "class A {} //"
+    source = declaration + "ж" * ((256_000 - len(declaration.encode())) // 2)
+    source += " " * (256_000 - len(source.encode()))
+    with TestClient(create_app(tmp_path)) as client:
+        imported = client.post(
+            "/api/projects",
+            content=json.dumps({"filename": "A.java", "source": source}),
+            headers={"content-type": "application/json"},
+        )
+        assert imported.status_code == 201, imported.text
+        project = imported.json()
+        assert project["originalSource"] == source
+        rejected = client.post("/api/projects", json={"filename": "A.java", "source": source + " "})
+        assert rejected.status_code == 422
+        assert client.get("/api/projects/current").json() == project
+
+
+def test_import_rejects_multibyte_source_over_the_byte_budget(tmp_path):
+    with TestClient(create_app(tmp_path)) as client:
+        response = client.post(
+            "/api/projects", json={"filename": "A.java", "source": "//" + "ж" * 128_000}
+        )
+        assert response.status_code == 422, response.text[:300]
+        assert client.get("/api/projects/current").status_code == 404
 
 
 def test_import_java_exposes_methods_graph_and_regenerated_source(tmp_path):
@@ -104,7 +133,7 @@ def test_file_paths_and_oversized_requests_are_rejected(tmp_path):
         assert (
             client.post(
                 "/api/projects",
-                content=b" " * (512 * 1024 + 1),
+                content=b" " * (2 * 1024 * 1024 + 1),
                 headers={"Content-Type": "application/json"},
             ).status_code
             == 413
