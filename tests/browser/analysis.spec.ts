@@ -21,10 +21,16 @@ test('диагностика объясняет находку и перевод
   await expect(page.getByLabel('Метод в окне кода')).toHaveText('second(int)');
   await expect(page.getByTestId('source-line-4')).toHaveClass(/highlighted/);
   await expect(page.locator('.blueprint-node.condition.selected')).toBeVisible();
+  await expect(page.getByLabel('Код блока', { exact: true })).toHaveValue('true');
+  await page.getByLabel('Код блока', { exact: true }).fill('false');
+  await page.getByRole('button', { name: 'Применить правку', exact: true }).click();
+  await expect(analysis.getByText(/Анализ устарел/)).toBeVisible();
+  await page.getByRole('button', { name: 'Анализировать', exact: true }).click();
+  await expect(analysis.getByRole('button', { name: /Условие if всегда равно false/ })).toBeVisible();
   await page.getByRole('button', { name: 'Редактировать Java' }).click();
   await replaceJavaSource(page, 'class Demo { int first() { return 1; } }');
   await expect(analysis.getByText(/Анализ устарел/)).toBeVisible();
-  await expect(analysis.getByRole('button', { name: /Условие if всегда равно true/ })).toBeDisabled();
+  await expect(analysis.getByRole('button', { name: /Условие if всегда равно false/ })).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Анализировать', exact: true })).toBeDisabled();
 });
 

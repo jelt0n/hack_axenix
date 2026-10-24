@@ -1,4 +1,4 @@
-import type { AnalysisReport, CheckJob, MethodGraph, Project, Scenario } from './types';
+import type { AnalysisReport, CheckJob, GraphEdit, MethodGraph, Project, Scenario } from './types';
 
 type FailureDetail = string | { message?: string; errors?: { message: string; line: number }[] }
   | { msg: string }[];
@@ -37,6 +37,12 @@ export const api = {
   rebuild: (id: string, revision: number) => request<Project>(
     `/api/projects/${encodeURIComponent(id)}/rebuild`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revision }),
+    },
+  ),
+  editGraph: (id: string, revision: number, edit: GraphEdit) => request<Project>(
+    `/api/projects/${encodeURIComponent(id)}/graph-edits`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...edit, revision }),
     },
   ),
   import: (filename: string, source: string) => request<Project>('/api/projects', {

@@ -52,7 +52,7 @@ def prepare_parser():
             raise ParserUnavailable(f"Не удалось собрать Java-модуль: {result.stderr[:2000]}")
 
 
-def parse_java(source: str, *, analyze: bool = False) -> dict:
+def parse_java(source: str, *, edit: dict | None = None, analyze: bool = False) -> dict:
     prepare_parser()
     try:
         # Keep concurrent parse requests within the memory budget of the demo server.
@@ -66,7 +66,7 @@ def parse_java(source: str, *, analyze: bool = False) -> dict:
                     f"{CLASSES}:{JAVA_CACHE}/*",
                     "BlueprintParser",
                 ],
-                input=json.dumps({"source": source, "analyze": analyze}),
+                input=json.dumps({"source": source, "edit": edit, "analyze": analyze}),
                 capture_output=True,
                 encoding="utf-8",
                 timeout=15,

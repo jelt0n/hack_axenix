@@ -45,7 +45,7 @@ export default function App() {
     projectRef.current = next; setRemoteChanged(false); setProject(next);
   }
   const editor = useWorkingCopy(project, adoptProject);
-  const graphStale = !!project && (remoteChanged || editor.dirty || project.revision !== project.graphRevision);
+  const graphStale = !!project && (remoteChanged || !!editor.conflict || editor.dirty || project.revision !== project.graphRevision);
 
   function openProject(next: Project) {
     analysisTarget.current = null;
@@ -83,7 +83,7 @@ export default function App() {
         const target = analysisTarget.current;
         if (target?.methodId === next.methodId && !next.stale) {
           const block = next.nodes.find(node => node.id === target.nodeId);
-          setSelection({ id: block?.id ?? '', kind: block?.kind ?? 'operation', code: '', range: target.range });
+          setSelection(block ? { ...block, range: target.range } : { id: '', kind: 'operation', code: '', range: target.range });
           analysisTarget.current = null;
         }
       }
@@ -121,7 +121,7 @@ export default function App() {
     setOriginal(false); setGraphOnly(false);
     if (methodId === finding.methodId && graph) {
       const block = graph.nodes.find(node => node.id === finding.nodeId);
-      setSelection({ id: block?.id ?? '', kind: block?.kind ?? 'operation', code: '', range: finding.range });
+      setSelection(block ? { ...block, range: finding.range } : { id: '', kind: 'operation', code: '', range: finding.range });
     } else {
       analysisTarget.current = finding;
       setMethodId(finding.methodId);
@@ -217,13 +217,14 @@ export default function App() {
               <div className={`editor-workspace ${graphOnly ? 'graph-only' : ''}`}>
                 {!graphOnly && <SourceView key={project.id} project={project} method={method} selection={selection?.range ?? null} blocks={graphStale ? [] : graph?.nodes ?? []}
                   onSelect={setSelection} original={original} onOriginal={setOriginal} value={editor.source} onChange={editor.changeSource} stale={graphStale} dirty={editor.dirty} />}
-                <MethodGraph graph={graph} method={method} selected={selection?.id ?? null} onSelect={setSelection} loading={graphLoading} stale={graphStale} />
+                <MethodGraph graph={graph} method={method} selected={selection?.id ?? null} onSelect={setSelection} loading={graphLoading} stale={graphStale}
+                  editDisabled={editor.saving || !!editor.conflict || original} onEdit={editor.editGraph} />
               </div>
               <div className="workspace-note"><span><i />{project.methods.length} методов · ревизия {project.revision}</span>
                 <span>Исходная версия сохранена <Check size={12} /></span></div>
               <AnalysisPanel key={project.id} project={project} pendingChanges={graphStale || editor.saving}
                 onNavigate={navigateFinding} onConflict={() => setRemoteChanged(true)} />
-              <CheckPanel project={project} open={checksOpen} onToggle={() => setChecksOpen(!checksOpen)} pendingChanges={remoteChanged || editor.dirty || editor.saving} />
+              <CheckPanel project={project} open={checksOpen} onToggle={() => setChecksOpen(!checksOpen)} pendingChanges={remoteChanged || !!editor.conflict || editor.dirty || editor.saving} />
             </>}
           <footer className="app-footer"><span><GitBranch size={13} />Java ↔ граф</span><span>Исследуйте код. Сохраняйте смысл.</span><span>AXENIX HACKATHON <i>2026</i></span></footer>
         </main>

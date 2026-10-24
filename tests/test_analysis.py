@@ -140,3 +140,33 @@ def test_array_size_and_independent_dimensions_have_explicit_bounds(tmp_path):
         estimate = report["methods"][0]["complexity"]
         assert estimate["label"] == "O(items.length + items.length · m)"
         assert estimate["assumptions"]
+
+
+def test_implicit_constructor_work_is_not_reported_as_constant(tmp_path):
+    source = "class Base { Base(){while(true){}} } class Demo extends Base { Demo(){} }"
+    with TestClient(create_app(tmp_path)) as client:
+        project = client.post(
+            "/api/projects", json={"filename": "Demo.java", "source": source}
+        ).json()
+        report = client.post(f"/api/projects/{project['id']}/analysis", json={"revision": 1}).json()
+        assert all(m["complexity"]["label"] == "не определена" for m in report["methods"])
+
+
+def test_nesting_points_to_condition_and_does_not_cross_deferred_lambda_boundary(tmp_path):
+    source = """class Demo {
+ int run(int n){if(n>0){if(n>1){if(n>2)return 1;}}return 0;}
+ void deferred(int n){for(int i=0;i<n;i++){Runnable r=()->{for(int j=0;j<n;j++) {}};}}
+} """
+    with TestClient(create_app(tmp_path)) as client:
+        project = client.post(
+            "/api/projects", json={"filename": "Demo.java", "source": source}
+        ).json()
+        report = client.post(f"/api/projects/{project['id']}/analysis", json={"revision": 1}).json()
+        assert [f["rule"] for f in report["findings"]] == ["deep-nesting"]
+        finding = report["findings"][0]
+        graph = client.get(
+            f"/api/projects/{project['id']}/methods/{finding['methodId']}/graph"
+        ).json()
+        block = next(n for n in graph["nodes"] if n["id"] == finding["nodeId"])
+        assert block["kind"] == "condition"
+        assert block["code"] == "n > 2"

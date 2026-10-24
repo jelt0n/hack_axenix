@@ -1,5 +1,4 @@
-import com.github.javaparser.JavaParser;
-import com.github.javaparser.ParserConfiguration;
+import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.Node;
 import com.github.javaparser.ast.body.*;
 import com.github.javaparser.ast.stmt.*;
@@ -12,17 +11,14 @@ public final class BlueprintAnalyzer {
     static final int DEEP_NESTING = 3;
 
     @SuppressWarnings("unchecked")
-    static Map<String, Object> analyze(String source, Map<String, Object> parsed) {
-        var unit = new JavaParser(new ParserConfiguration().setTabSize(1)
-            .setLanguageLevel(ParserConfiguration.LanguageLevel.BLEEDING_EDGE))
-            .parse(source).getResult().orElseThrow();
+    static Map<String, Object> analyze(CompilationUnit unit, Map<String, Object> parsed) {
         List<Map<String, Object>> findings = new ArrayList<>();
         List<Map<String, Object>> methods = new ArrayList<>();
         Map<String, Object> graphs = (Map<String, Object>) parsed.get("graphs");
         for (Node node : unit.findAll(Node.class)) {
             if (!(node instanceof MethodDeclaration) && !(node instanceof ConstructorDeclaration)) continue;
             var callable = (CallableDeclaration<?>) node;
-            String id = "method-" + node.getBegin().orElseThrow().line + "-" + node.getBegin().orElseThrow().column;
+            String id = BlueprintParser.methodId(node);
             var graph = (Map<String, Object>) graphs.get(id);
             Optional<BlockStmt> body = node instanceof MethodDeclaration m ? m.getBody()
                 : Optional.of(((ConstructorDeclaration) node).getBody());
@@ -32,7 +28,7 @@ public final class BlueprintAnalyzer {
                     "Рассмотрите выделение связанных операций в отдельные методы.", node, id, graph));
             }
             for (Statement statement : body.get().findAll(Statement.class)) {
-                if (statement.findAncestor(CallableDeclaration.class).orElse(null) != callable) continue;
+                if (!belongsToMethod(statement, callable)) continue;
                 int depth = 0;
                 boolean outerLoop = false;
                 for (Node parent = statement.getParentNode().orElse(null); parent != null && parent != body.get();
@@ -59,10 +55,21 @@ public final class BlueprintAnalyzer {
                 }
             }
             methods.add(Map.of("methodId", id, "signature", callable.getSignature().asString(),
-                "range", location(node), "complexity", complexity(callable, body.get())));
+                "range", BlueprintParser.location(node), "complexity", complexity(callable, body.get())));
         }
         return Map.of("findings", findings, "methods", methods,
             "thresholds", Map.of("longMethodLines", LONG_METHOD_LINES, "deepNesting", DEEP_NESTING));
+    }
+
+    static boolean belongsToMethod(Node statement, CallableDeclaration<?> method) {
+        for (Node parent = statement.getParentNode().orElse(null); parent != null;
+                parent = parent.getParentNode().orElse(null)) {
+            if (parent == method) return true;
+            if (parent instanceof LambdaExpr || parent instanceof TypeDeclaration<?>
+                    || parent instanceof CallableDeclaration<?>
+                    || parent instanceof ObjectCreationExpr creation && creation.getAnonymousClassBody().isPresent()) return false;
+        }
+        return false;
     }
 
     static boolean loop(Node node) {
@@ -79,6 +86,8 @@ public final class BlueprintAnalyzer {
     }
 
     static Map<String, Object> complexity(CallableDeclaration<?> callable, BlockStmt body) {
+        if (callable instanceof ConstructorDeclaration)
+            return unknown("Стоимость неявного super() и инициализаторов экземпляра не определена.");
         if (!body.findAll(MethodCallExpr.class).isEmpty())
             return unknown("Стоимость вызовов неизвестна без анализа вызываемого кода, включая рекурсивные вызовы.");
         Set<String> scalars = new HashSet<>();
@@ -194,14 +203,16 @@ public final class BlueprintAnalyzer {
     @SuppressWarnings("unchecked")
     static Map<String, Object> finding(String rule, String message, String recommendation,
             Node origin, String methodId, Map<String, Object> graph) {
-        var range = location(origin);
+        var range = BlueprintParser.location(origin);
+        var anchor = origin instanceof IfStmt branch ? BlueprintParser.location(branch.getCondition()) : range;
         String nodeId = "";
         long best = Long.MAX_VALUE;
         for (var block : (List<Map<String, Object>>) graph.get("nodes")) {
+            if (block.get("kind").equals("exit")) continue;
             var r = (Map<String, Integer>) block.get("range");
             long start = r.get("startLine") * 1000000L + r.get("startColumn");
             long end = r.get("endLine") * 1000000L + r.get("endColumn");
-            long point = range.get("startLine") * 1000000L + range.get("startColumn");
+            long point = anchor.get("startLine") * 1000000L + anchor.get("startColumn");
             if (start <= point && point <= end && end - start < best) {
                 nodeId = (String) block.get("id"); best = end - start;
             }
@@ -210,9 +221,4 @@ public final class BlueprintAnalyzer {
             "methodId", methodId, "nodeId", nodeId, "range", range);
     }
 
-    static Map<String, Integer> location(Node node) {
-        var r = node.getRange().orElseThrow();
-        return Map.of("startLine", r.begin.line, "startColumn", r.begin.column,
-            "endLine", r.end.line, "endColumn", r.end.column);
-    }
 }
