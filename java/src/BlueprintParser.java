@@ -191,6 +191,14 @@ public final class BlueprintParser {
         }
 
         Flow statement(Statement statement, Flow next) {
+            boolean terminal = statement.isReturnStmt() || statement.isThrowStmt();
+            boolean switchExpression = statement.getChildNodes().stream()
+                .filter(node -> node instanceof Expression)
+                .anyMatch(node -> node.findFirst(SwitchExpr.class).isPresent());
+            if (switchExpression) {
+                return opaque(statement, terminal ? new Flow(exit, false) : next,
+                    "switch-выражение сохраняется целиком; его внутренний поток пока не раскрывается.");
+            }
             if (statement.isBlockStmt()) {
                 return block(statement.asBlockStmt(), next, "block", "Блок, строка "
                     + statement.getBegin().orElseThrow().line);
@@ -290,11 +298,6 @@ public final class BlueprintParser {
                     connect(id, control.continueTo(), "Продолжить");
                     return new Flow(id, false);
                 }
-            }
-            boolean terminal = statement.isReturnStmt() || statement.isThrowStmt();
-            if ((statement.isExpressionStmt() || terminal) && !statement.findAll(SwitchExpr.class).isEmpty()) {
-                return opaque(statement, terminal ? new Flow(exit, false) : next,
-                    "switch-выражение сохраняется целиком; его внутренний поток пока не раскрывается.");
             }
             boolean simple = isEditableOperation(statement);
             String kind = terminal ? "return" : simple ? "operation" : "opaque";

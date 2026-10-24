@@ -125,6 +125,60 @@ def test_control_corpus_roundtrip_edit_compile_and_execute(tmp_path, case):
 
 
 @pytest.mark.parametrize(
+    ("body", "container_kind", "stdout"),
+    [
+        ("int n = 0; while (n < 2) n++; System.out.println(n);", "loop", "2\n"),
+        ("int n = 0; switch(1) { default: n++; break; } System.out.println(n);", "case", "1\n"),
+    ],
+)
+@pytest.mark.skipif(
+    not shutil.which(os.environ.get("BLUEPRINTS_DOCKER_BIN", "docker")),
+    reason="Structural edits require actual compilation and Docker execution",
+)
+def test_insert_move_delete_in_control_containers_compile_and_match(
+    tmp_path, body, container_kind, stdout
+):
+    with TestClient(create_app(tmp_path)) as client:
+        project, graph = import_flow(client, body)
+        prefix = f"/api/projects/{project['id']}"
+        for action in ("insert", "move", "delete"):
+            payload = {
+                "revision": project["revision"],
+                "methodId": graph["methodId"],
+                "action": action,
+            }
+            if action == "insert":
+                container = next(c for c in graph["containers"] if c["kind"] == container_kind)
+                payload.update(containerId=container["id"], index=1, code="n += 0;")
+            else:
+                payload["nodeId"] = node(graph, "n += 0;")["id"]
+                if action == "move":
+                    payload["index"] = 0
+                    payload["containerId"] = node(graph, "n += 0;")["containerId"]
+            response = client.post(prefix + "/graph-edits", json=payload)
+            assert response.status_code == 200, response.text
+            project = response.json()
+            assert project["originalSource"] == program(body)
+            graph = client.get(prefix + f"/methods/{graph['methodId']}/graph").json()
+            job = client.post(
+                prefix + "/checks",
+                json={
+                    "revision": project["revision"],
+                    "scenarios": [{"name": action, "stdin": ""}],
+                },
+            )
+            assert job.status_code == 202, job.text
+            run_worker(tmp_path, once=True)
+            completed = client.get(f"/api/checks/{job.json()['id']}").json()
+            assert completed["result"]["verdict"] == "matched", completed
+            for version in ("original", "working"):
+                result = completed["result"]["cases"][0][version]
+                assert result["stdout"] == stdout
+                assert result["stderr"] == ""
+                assert result["exitCode"] == 0
+
+
+@pytest.mark.parametrize(
     "body",
     [
         "int n = 1; switch(n) { case 1 -> System.out.println(n); "
@@ -132,6 +186,14 @@ def test_control_corpus_roundtrip_edit_compile_and_execute(tmp_path, case):
         "int n = switch(1) { case 1 -> 2; default -> 3; }; System.out.println(n);",
         'Object o = "x"; switch(o) { case String s -> { System.out.println(s); } default -> {} }',
         "outer: while(true) { break outer; }",
+        "if (switch(1) { default -> true; }) System.out.println(1);",
+        "while (switch(1) { default -> false; }) System.out.println(1);",
+        "do {} while (switch(1) { default -> false; });",
+        "for (int i = switch(1) { default -> 0; }; i < 1; i++) {}",
+        "for (int i = 0; switch(1) { default -> false; }; i++) {}",
+        "for (int i = 0; i < 1; i += switch(1) { default -> 1; }) {}",
+        "for (int i : switch(1) { default -> new int[]{1}; }) {}",
+        "switch(switch(1) { default -> 1; }) { default: break; }",
     ],
 )
 def test_unexpanded_forms_are_explicit_and_preserve_source(tmp_path, body):
