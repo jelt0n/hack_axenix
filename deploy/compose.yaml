@@ -1,0 +1,91 @@
+name: blueprints-demo
+
+x-service: &service
+  pull_policy: never
+  read_only: true
+  restart: unless-stopped
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "2"
+
+services:
+  proxy:
+    <<: *service
+    image: ${BLUEPRINTS_PROXY_IMAGE:?Set the release proxy image ID}
+    ports:
+      - "${BLUEPRINTS_BIND:-0.0.0.0}:${BLUEPRINTS_PORT:-80}:8080"
+    networks: [public, backend]
+    depends_on:
+      api:
+        condition: service_healthy
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=32m,uid=101,gid=101
+    mem_limit: 128m
+    memswap_limit: 128m
+    cpus: 0.25
+    pids_limit: 32
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, "http://127.0.0.1:8080/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+  api:
+    <<: *service
+    image: ${BLUEPRINTS_API_IMAGE:?Set the release API image ID}
+    environment:
+      BLUEPRINTS_PROJECT_LIMIT: ${BLUEPRINTS_PROJECT_LIMIT:-100}
+      BLUEPRINTS_PROJECT_BYTES: ${BLUEPRINTS_PROJECT_BYTES:-67108864}
+    networks: [backend]
+    volumes:
+      - projects:/data
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=32m
+    mem_limit: 768m
+    memswap_limit: 768m
+    cpus: 0.75
+    pids_limit: 128
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  worker:
+    <<: *service
+    image: ${BLUEPRINTS_WORKER_IMAGE:?Set the release worker image ID}
+    network_mode: none
+    environment:
+      BLUEPRINTS_RUNNER_IMAGE: ${BLUEPRINTS_RUNNER_IMAGE:?Set the release runner image ID}
+    depends_on:
+      api:
+        condition: service_healthy
+    volumes:
+      - projects:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    group_add:
+      - "${DOCKER_GID:?Set the Docker socket group ID}"
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=32m
+    mem_limit: 256m
+    memswap_limit: 256m
+    cpus: 0.25
+    pids_limit: 64
+    stop_grace_period: 45s
+    healthcheck:
+      test: [CMD, python, -c, "from pathlib import Path; from backend.checks import CheckQueue; raise SystemExit(not CheckQueue(Path('/data')).available())"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+networks:
+  public:
+  backend:
+    internal: true
+
+volumes:
+  projects:

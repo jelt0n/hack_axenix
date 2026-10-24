@@ -2,26 +2,41 @@ import hashlib
 import os
 import secrets
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator
 
 from backend.checks import CheckQueue, CheckRequest, QueueFull
 from backend.java_parser import ParserUnavailable, parse_java
-from backend.projects import ProjectNotFound, ProjectStore, RevisionConflict, summary
+from backend.projects import (
+    ProjectCapacityExceeded,
+    ProjectNotFound,
+    ProjectStore,
+    RevisionConflict,
+    summary,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 COOKIE = "blueprints_session"
-MAX_BODY = 512 * 1024
+MAX_BODY = 2 * 1024 * 1024
+
+
+def validate_source_size(value: str) -> str:
+    if len(value.encode("utf-8")) > 256_000:
+        raise ValueError("Исходник превышает 256 КБ UTF-8")
+    return value
+
+
+SourceText = Annotated[str, AfterValidator(validate_source_size)]
 
 
 class ImportProject(BaseModel):
     filename: str = Field(min_length=6, max_length=120)
-    source: str = Field(min_length=1, max_length=256_000)
+    source: SourceText = Field(min_length=1, max_length=256_000)
 
     @field_validator("filename")
     @classmethod
@@ -39,14 +54,7 @@ class RevisionRequest(BaseModel):
 
 
 class SourceRequest(RevisionRequest):
-    source: str = Field(max_length=256_000)
-
-    @field_validator("source")
-    @classmethod
-    def source_size(cls, value: str) -> str:
-        if len(value.encode("utf-8")) > 256_000:
-            raise ValueError("Исходник превышает 256 КБ UTF-8")
-        return value
+    source: SourceText = Field(max_length=256_000)
 
 
 class BranchSelection(RevisionRequest):
@@ -95,6 +103,10 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     async def project_not_found(request: Request, exc: ProjectNotFound):
         return JSONResponse({"detail": "Проект не найден или срок хранения истёк"}, 404)
 
+    @app.exception_handler(ProjectCapacityExceeded)
+    async def project_capacity_exceeded(request: Request, exc: ProjectCapacityExceeded):
+        return JSONResponse({"detail": str(exc)}, 429)
+
     @app.middleware("http")
     async def limit_request(request: Request, call_next):
         if request.method == "POST" and request.url.path.startswith("/api/"):
@@ -102,9 +114,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             async for chunk in request.stream():
                 body.extend(chunk)
                 if len(body) > MAX_BODY:
-                    return JSONResponse(
-                        {"detail": "Файл слишком большой. Лимит запроса — 512 КБ."}, 413
-                    )
+                    return JSONResponse({"detail": "Запрос слишком большой. Лимит — 2 МиБ."}, 413)
             # Starlette forwards the cached body to downstream JSON validation.
             request._body = bytes(body)
         return await call_next(request)
