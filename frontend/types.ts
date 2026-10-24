@@ -17,7 +17,7 @@ export type Project = {
 export type Diagnostic = { message: string; line: number; column: number };
 
 export type GraphNode = {
-  id: string; kind: 'entry' | 'exit' | 'operation' | 'condition' | 'return' | 'opaque' | 'jump' | 'control' | 'dispatch';
+  id: string; kind: 'entry' | 'exit' | 'operation' | 'condition' | 'return' | 'opaque' | 'jump' | 'control' | 'dispatch' | 'exception' | 'completion';
   code: string; range: SourceRange;
   editable?: boolean; containerId?: string; index?: number;
 };

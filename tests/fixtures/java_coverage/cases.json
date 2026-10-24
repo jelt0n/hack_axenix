@@ -1,0 +1,12 @@
+[
+  {"name":"declarations","method":"Box","signature":"Box(int)","target":"this.value = value;","replacement":"this.value = value + 0;","stdout":"коробка:3:5:1\n"},
+  {"name":"primitives","method":"main","target":"total += (int) Math.abs(-2.8);","replacement":"total = total + (int) Math.abs(-2.8);","stdout":"Я:16:true:7\n"},
+  {"name":"console","method":"main","target":"number += 0;","replacement":"number = number + 0;","stdin":"Мир\n4\n","stdout":"Привет, Мир! 4\nСумма: 5\n","stderr":"Диагностика: Мир\n"},
+  {"name":"collections","method":"main","target":"total += 0;","replacement":"total = total + 0;","stdout":"[1, 2, 3]:[1, 2, 3]:[1, 2, 3]\n14\n"},
+  {"name":"caught","method":"main","target":"System.out.println(\"Ошибка: \" + error.getMessage());","replacement":"System.out.println(\"Ошибка: \" + error.getMessage() + \"\");","stdout":"Ошибка: отрицательное\nЗавершено\n"},
+  {"name":"uncaught","method":"main","target":"throw new Broken(\"сбой \" + value);","replacement":"throw new Broken(\"сбой \" + value + \"\");","stdout":"Очистка\n","exception":{"type":"Broken","message":"сбой 1","cause":null,"suppressed":[]}},
+  {"name":"nested_finally","method":"calculate","target":"return 1;","replacement":"return 1 + 0;","stdout":"внутри\nснаружи\n1\nшаг 0\nшаг 1\n"},
+  {"name":"finally_override","method":"calculate","target":"return 2;","replacement":"return 2 + 0;","stdout":"2\n"},
+  {"name":"nested_cleanup","method":"calculate","target":"return 3;","replacement":"return 3 + 0;","stdout":"тело очистки\nвложенная очистка\n3\n"},
+  {"name":"multi_catch","method":"main","target":"throw new IllegalStateException(error.getMessage());","replacement":"throw new IllegalStateException(error.getMessage() + \"\");","stdout":"первый 1\nIllegalStateException:ввод\nвторой\n"}
+]
