@@ -1,4 +1,5 @@
 import json
+import os
 import secrets
 import sqlite3
 import time
@@ -11,6 +12,10 @@ class RevisionConflict(Exception):
 
 
 class ProjectNotFound(Exception):
+    pass
+
+
+class ProjectCapacityExceeded(Exception):
     pass
 
 
@@ -30,6 +35,10 @@ class ProjectStore:
     def __init__(self, directory: Path):
         directory.mkdir(parents=True, exist_ok=True)
         self.path = directory / "projects.sqlite3"
+        self.project_limit = int(os.environ.get("BLUEPRINTS_PROJECT_LIMIT", "100"))
+        self.byte_limit = int(os.environ.get("BLUEPRINTS_PROJECT_BYTES", str(64 * 1024 * 1024)))
+        if self.project_limit < 1 or self.byte_limit < 1:
+            raise ValueError("Project count and byte limits must be positive")
         with self.connect() as db:
             db.execute("""CREATE TABLE IF NOT EXISTS projects (
                 id TEXT PRIMARY KEY, session TEXT NOT NULL, created REAL NOT NULL,
@@ -63,12 +72,29 @@ class ProjectStore:
             "diagnostics": [],
         }
         with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
             db.execute("DELETE FROM projects WHERE created < ?", (time.time() - 24 * 3600,))
+            if db.execute("SELECT COUNT(*) FROM projects").fetchone()[0] >= self.project_limit:
+                raise ProjectCapacityExceeded(
+                    "Достигнут общий лимит временных проектов. Повторите позже."
+                )
             db.execute(
                 "INSERT INTO projects VALUES (?, ?, ?, ?)",
-                (project["id"], session, time.time(), json.dumps(project, ensure_ascii=False)),
+                (project["id"], session, time.time(), self._payload(db, project)),
             )
         return project
+
+    def _payload(self, db: sqlite3.Connection, project: dict) -> str:
+        payload = json.dumps(project, ensure_ascii=False)
+        occupied = db.execute(
+            "SELECT COALESCE(SUM(length(CAST(payload AS BLOB))), 0) FROM projects WHERE id != ?",
+            (project["id"],),
+        ).fetchone()[0]
+        if occupied + len(payload.encode("utf-8")) > self.byte_limit:
+            raise ProjectCapacityExceeded(
+                "Хранилище временных проектов заполнено. Изменение не сохранено; уменьшите исходник или повторите позже."
+            )
+        return payload
 
     def get(self, session: str, project_id: str | None = None) -> dict | None:
         with self.connect() as db:
@@ -98,9 +124,10 @@ class ProjectStore:
             if project["revision"] != revision:
                 raise RevisionConflict
             change(project)
+            db.execute("DELETE FROM projects WHERE created < ?", (time.time() - 86400,))
             db.execute(
                 "UPDATE projects SET payload=? WHERE id=?",
-                (json.dumps(project, ensure_ascii=False), project_id),
+                (self._payload(db, project), project_id),
             )
         return project
 

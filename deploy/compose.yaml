@@ -37,6 +37,9 @@ services:
   api:
     <<: *service
     image: ${BLUEPRINTS_API_IMAGE:?Set the release API image ID}
+    environment:
+      BLUEPRINTS_PROJECT_LIMIT: ${BLUEPRINTS_PROJECT_LIMIT:-100}
+      BLUEPRINTS_PROJECT_BYTES: ${BLUEPRINTS_PROJECT_BYTES:-67108864}
     networks: [backend]
     volumes:
       - projects:/data

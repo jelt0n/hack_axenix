@@ -12,7 +12,13 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend.checks import CheckQueue, CheckRequest, QueueFull
 from backend.java_parser import ParserUnavailable, parse_java
-from backend.projects import ProjectNotFound, ProjectStore, RevisionConflict, summary
+from backend.projects import (
+    ProjectCapacityExceeded,
+    ProjectNotFound,
+    ProjectStore,
+    RevisionConflict,
+    summary,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 COOKIE = "blueprints_session"
@@ -94,6 +100,10 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     @app.exception_handler(ProjectNotFound)
     async def project_not_found(request: Request, exc: ProjectNotFound):
         return JSONResponse({"detail": "Проект не найден или срок хранения истёк"}, 404)
+
+    @app.exception_handler(ProjectCapacityExceeded)
+    async def project_capacity_exceeded(request: Request, exc: ProjectCapacityExceeded):
+        return JSONResponse({"detail": str(exc)}, 429)
 
     @app.middleware("http")
     async def limit_request(request: Request, call_next):
