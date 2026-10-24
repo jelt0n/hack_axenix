@@ -25,7 +25,14 @@ public final class BlueprintParser {
         try {
             JsonObject request = JsonParser.parseString(
                 new String(System.in.readAllBytes(), StandardCharsets.UTF_8)).getAsJsonObject();
-            System.out.println(JSON.toJson(parse(request.get("source").getAsString())));
+            String source = request.get("source").getAsString();
+            Map<String, Object> parsed = parse(source);
+            if (request.has("analyze") && request.get("analyze").getAsBoolean()
+                    && Boolean.TRUE.equals(parsed.get("ok"))) {
+                parsed = new LinkedHashMap<>(parsed);
+                parsed.put("analysis", BlueprintAnalyzer.analyze(source, parsed));
+            }
+            System.out.println(JSON.toJson(parsed));
         } catch (StackOverflowError | OutOfMemoryError error) {
             System.out.println("{\"ok\":false,\"errors\":[{\"message\":\"Программа слишком сложна для разбора\",\"line\":1,\"column\":1}]}");
         } catch (Exception error) {

@@ -9,9 +9,10 @@ import { exampleSource } from './example';
 import MethodGraph from './MethodGraph';
 import SourceView from './SourceView';
 import CheckPanel from './CheckPanel';
+import AnalysisPanel from './AnalysisPanel';
 import useWorkingCopy from './useWorkingCopy';
 import { sameMethod } from './methods';
-import type { GraphNode, JavaMethod, MethodGraph as Graph, Project } from './types';
+import type { AnalysisFinding, GraphNode, JavaMethod, MethodGraph as Graph, Project } from './types';
 import '@xyflow/react/dist/style.css';
 import './style.css';
 
@@ -30,6 +31,7 @@ export default function App() {
   const [help, setHelp] = useState(false);
   const [checksOpen, setChecksOpen] = useState(false);
   const input = useRef<HTMLInputElement>(null);
+  const analysisTarget = useRef<AnalysisFinding | null>(null);
   const method = project?.methods.find(item => item.id === methodId) ?? null;
   const projectRef = useRef(project); projectRef.current = project;
   const methodRef = useRef(methodId); methodRef.current = methodId;
@@ -39,12 +41,14 @@ export default function App() {
     const selected = previous.methods.find(item => item.id === methodRef.current);
     const nextMethod = next.methods.find(item => sameMethod(item, selected));
     setMethodId(nextMethod?.id ?? next.methods.find(item => item.hasBody)?.id ?? next.methods[0]?.id ?? null);
+    analysisTarget.current = null;
     projectRef.current = next; setRemoteChanged(false); setProject(next);
   }
   const editor = useWorkingCopy(project, adoptProject);
   const graphStale = !!project && (remoteChanged || editor.dirty || project.revision !== project.graphRevision);
 
   function openProject(next: Project) {
+    analysisTarget.current = null;
     setProject(next);
     const remembered = sessionStorage.getItem(`method:${next.id}`);
     setMethodId(next.methods.find(item => item.id === remembered)?.id
@@ -74,7 +78,15 @@ export default function App() {
       if (next.projectRevision >= current.revision) {
         setRemoteChanged(next.projectRevision !== current.revision || next.sourceRevision !== current.graphRevision);
       }
-      if (next.sourceRevision === current.graphRevision) setGraph(next);
+      if (next.sourceRevision === current.graphRevision) {
+        setGraph(next);
+        const target = analysisTarget.current;
+        if (target?.methodId === next.methodId && !next.stale) {
+          const block = next.nodes.find(node => node.id === target.nodeId);
+          setSelection({ id: block?.id ?? '', kind: block?.kind ?? 'operation', code: '', range: target.range });
+          analysisTarget.current = null;
+        }
+      }
     })
       .catch(async reason => {
         if (!active) return;
@@ -102,6 +114,18 @@ export default function App() {
     if (!file.name.endsWith('.java')) { setError('Выберите файл с расширением .java'); return; }
     if (file.size > 256_000) { setError('Выберите Java-файл размером до 256 КБ'); return; }
     await importSource(file.name, await file.text());
+  }
+
+  function navigateFinding(finding: AnalysisFinding) {
+    if (graphStale) return;
+    setOriginal(false); setGraphOnly(false);
+    if (methodId === finding.methodId && graph) {
+      const block = graph.nodes.find(node => node.id === finding.nodeId);
+      setSelection({ id: block?.id ?? '', kind: block?.kind ?? 'operation', code: '', range: finding.range });
+    } else {
+      analysisTarget.current = finding;
+      setMethodId(finding.methodId);
+    }
   }
 
   function exportSource() {
@@ -139,7 +163,7 @@ export default function App() {
             <nav className="methods" aria-label="Методы программы">{[...groups].map(([owner, methods]) => <div key={owner}>
               <div className="class-label"><Box size={12} />{owner || 'Без класса'}</div>
               {methods.map(item => <button key={item.id} className={`method-button ${item.id === methodId ? 'active' : ''}`}
-                aria-pressed={item.id === methodId} onClick={() => setMethodId(item.id)} title={item.signature}>
+                aria-pressed={item.id === methodId} onClick={() => { analysisTarget.current = null; setMethodId(item.id); }} title={item.signature}>
                 <span className={`method-icon ${item.kind === 'constructor' ? 'constructor' : ''}`}>{item.kind === 'constructor' ? 'C' : 'ƒ'}</span>
                 <span>{item.signature}</span>{item.id === methodId && <ChevronRight size={13} />}
               </button>)}
@@ -197,6 +221,8 @@ export default function App() {
               </div>
               <div className="workspace-note"><span><i />{project.methods.length} методов · ревизия {project.revision}</span>
                 <span>Исходная версия сохранена <Check size={12} /></span></div>
+              <AnalysisPanel key={project.id} project={project} pendingChanges={graphStale || editor.saving}
+                onNavigate={navigateFinding} onConflict={() => setRemoteChanged(true)} />
               <CheckPanel project={project} open={checksOpen} onToggle={() => setChecksOpen(!checksOpen)} pendingChanges={remoteChanged || editor.dirty || editor.saving} />
             </>}
           <footer className="app-footer"><span><GitBranch size={13} />Java ↔ граф</span><span>Исследуйте код. Сохраняйте смысл.</span><span>AXENIX HACKATHON <i>2026</i></span></footer>

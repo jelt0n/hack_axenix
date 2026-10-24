@@ -181,6 +181,22 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             store.rebuild(request.cookies.get(COOKIE, ""), project_id, payload.revision, parsed)
         )
 
+    @app.post("/api/projects/{project_id}/analysis")
+    def analyze_project(project_id: str, payload: RevisionRequest, request: Request):
+        project = owned(request, project_id)
+        if project["revision"] != payload.revision or project["graphRevision"] != payload.revision:
+            raise HTTPException(409, "Обновите граф по текущей версии перед анализом.")
+        try:
+            parsed = parse_java(project["generatedSource"], analyze=True)
+        except ParserUnavailable as exc:
+            raise HTTPException(503, str(exc)) from exc
+        latest = owned(request, project_id)
+        if latest["revision"] != payload.revision:
+            raise RevisionConflict
+        if not parsed["ok"]:
+            raise HTTPException(422, "Исправьте синтаксические ошибки перед анализом.")
+        return {"projectId": project_id, "sourceRevision": payload.revision, **parsed["analysis"]}
+
     @app.get("/api/projects/{project_id}/methods/{method_id}/graph")
     def get_graph(project_id: str, method_id: str, request: Request):
         project = owned(request, project_id)
