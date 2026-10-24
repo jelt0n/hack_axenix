@@ -58,6 +58,17 @@ class BranchConfirmation(BranchSelection):
     previewHash: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
+class ExtractionSelection(RevisionRequest):
+    methodId: str = Field(min_length=1, max_length=120)
+    startIndex: int = Field(ge=0, le=10000)
+    endIndex: int = Field(ge=1, le=10000)
+    methodName: str = Field(min_length=1, max_length=80)
+
+
+class ExtractionConfirmation(ExtractionSelection):
+    previewHash: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
 class GraphEditRequest(RevisionRequest):
     methodId: str = Field(min_length=1, max_length=120)
     action: Literal["replace", "insert", "delete", "move"]
@@ -230,23 +241,20 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             "stale": project["graphRevision"] != project["revision"],
         }
 
-    def constant_candidate(project_id: str, payload: BranchSelection, request: Request):
+    def transformation_candidate(
+        project_id: str, payload: RevisionRequest, request: Request, edit: dict
+    ):
         project = owned(request, project_id)
         if project["revision"] != payload.revision or project["graphRevision"] != payload.revision:
             raise HTTPException(409, "Граф изменился. Обновите его и повторите предпросмотр.")
         try:
-            parsed = parse_java(
-                project["generatedSource"],
-                edit={
-                    "action": "simplify-constant",
-                    "methodId": payload.methodId,
-                    "nodeId": payload.nodeId,
-                },
-            )
+            parsed = parse_java(project["generatedSource"], edit=edit)
         except ParserUnavailable as exc:
             raise HTTPException(503, str(exc)) from exc
         if not parsed["ok"]:
-            raise HTTPException(422, {"message": "Упрощение отклонено", "errors": parsed["errors"]})
+            raise HTTPException(
+                422, {"message": "Преобразование отклонено", "errors": parsed["errors"]}
+            )
         if len(parsed["generatedSource"].encode("utf-8")) > 256_000:
             raise HTTPException(422, "После преобразования исходник превышает 256 КБ UTF-8")
         if owned(request, project_id)["revision"] != payload.revision:
@@ -256,7 +264,16 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
 
     @app.post("/api/projects/{project_id}/transformations/constant-branch/preview")
     def preview_branch(project_id: str, payload: BranchSelection, request: Request):
-        parsed, digest = constant_candidate(project_id, payload, request)
+        parsed, digest = transformation_candidate(
+            project_id,
+            payload,
+            request,
+            {
+                "action": "simplify-constant",
+                "methodId": payload.methodId,
+                "nodeId": payload.nodeId,
+            },
+        )
         return {
             "projectId": project_id,
             "sourceRevision": payload.revision,
@@ -268,11 +285,58 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
 
     @app.post("/api/projects/{project_id}/transformations/constant-branch/apply")
     def apply_branch(project_id: str, payload: BranchConfirmation, request: Request):
-        parsed, digest = constant_candidate(project_id, payload, request)
+        parsed, digest = transformation_candidate(
+            project_id,
+            payload,
+            request,
+            {
+                "action": "simplify-constant",
+                "methodId": payload.methodId,
+                "nodeId": payload.nodeId,
+            },
+        )
         if digest != payload.previewHash:
             raise HTTPException(
                 409, "Предпросмотр не совпадает с преобразованием. Откройте его снова."
             )
+        return summary(
+            store.apply_graph_edit(
+                request.cookies.get(COOKIE, ""), project_id, payload.revision, parsed
+            )
+        )
+
+    @app.post("/api/projects/{project_id}/transformations/extract-method/preview")
+    def preview_extraction(project_id: str, payload: ExtractionSelection, request: Request):
+        parsed, digest = transformation_candidate(
+            project_id,
+            payload,
+            request,
+            {
+                "action": "extract-method",
+                **payload.model_dump(exclude={"revision"}),
+            },
+        )
+        return {
+            "projectId": project_id,
+            "sourceRevision": payload.revision,
+            **payload.model_dump(exclude={"revision"}),
+            "previewHash": digest,
+            **parsed["transformation"],
+        }
+
+    @app.post("/api/projects/{project_id}/transformations/extract-method/apply")
+    def apply_extraction(project_id: str, payload: ExtractionConfirmation, request: Request):
+        parsed, digest = transformation_candidate(
+            project_id,
+            payload,
+            request,
+            {
+                "action": "extract-method",
+                **payload.model_dump(exclude={"revision", "previewHash"}),
+            },
+        )
+        if digest != payload.previewHash:
+            raise HTTPException(409, "Предпросмотр изменился. Подготовьте выделение метода заново.")
         return summary(
             store.apply_graph_edit(
                 request.cookies.get(COOKIE, ""), project_id, payload.revision, parsed

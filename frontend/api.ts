@@ -1,4 +1,4 @@
-import type { BranchPreview, AnalysisReport, CheckJob, GraphEdit, MethodGraph, Project, Scenario } from './types';
+import type { ExtractionSelection, ExtractionPreview, BranchPreview, AnalysisReport, CheckJob, GraphEdit, MethodGraph, Project, Scenario } from './types';
 
 type FailureDetail = string | { message?: string; errors?: { message: string; line: number }[] }
   | { msg: string }[];
@@ -21,6 +21,18 @@ export class ApiError extends Error {
 }
 
 export const api = {
+  previewExtraction: (id: string, revision: number, selection: ExtractionSelection) => request<ExtractionPreview>(
+    `/api/projects/${encodeURIComponent(id)}/transformations/extract-method/preview`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revision, ...selection }),
+    },
+  ),
+  applyExtraction: (preview: ExtractionPreview) => request<Project>(
+    `/api/projects/${encodeURIComponent(preview.projectId)}/transformations/extract-method/apply`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ revision: preview.sourceRevision, methodId: preview.methodId,
+        startIndex: preview.startIndex, endIndex: preview.endIndex, methodName: preview.methodName, previewHash: preview.previewHash }),
+    },
+  ),
   previewBranch: (id: string, revision: number, methodId: string, nodeId: string) => request<BranchPreview>(
     `/api/projects/${encodeURIComponent(id)}/transformations/constant-branch/preview`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },

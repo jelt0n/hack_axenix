@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, ApiError } from './api';
-import type { BranchPreview, GraphEdit, Project } from './types';
+import type { ExtractionPreview, BranchPreview, GraphEdit, Project } from './types';
 
 type Draft = { id: string; source: string; baseRevision: number };
 const key = (id: string) => `java-draft:${id}`;
@@ -140,13 +140,13 @@ export default function useWorkingCopy(project: Project | null, onUpdate: (next:
     await applySourceChange(current => api.editGraph(current.id, current.revision, edit));
   }
 
-  async function applyBranch(preview: BranchPreview) {
+  async function applyTransformation(preview: BranchPreview | ExtractionPreview) {
     if (current.current.project?.id !== preview.projectId
         || current.current.project?.revision !== preview.sourceRevision) return;
-    return applySourceChange(() => api.applyBranch(preview));
+    return applySourceChange(() => 'nodeId' in preview ? api.applyBranch(preview) : api.applyExtraction(preview));
   }
 
   const source = draft?.id === project?.id ? draft?.source ?? '' : project?.generatedSource ?? '';
   const dirty = !!project && source !== project.generatedSource;
-  return { source, dirty, saving, localSaved, error, conflict, changeSource, rebuild, useServerCopy, editGraph, applyBranch };
+  return { source, dirty, saving, localSaved, error, conflict, changeSource, rebuild, useServerCopy, editGraph, applyTransformation };
 }

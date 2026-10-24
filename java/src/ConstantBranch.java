@@ -43,8 +43,8 @@ public final class ConstantBranch {
         String after = chosen == null ? "{}" : chosen.getTokenRange().orElseThrow().toString();
         if (chosen != null && !chosen.isBlockStmt()) after = "{\n" + after + "\n}";
         var range = branch.getRange().orElseThrow();
-        int start = offset(source, range.begin.line, range.begin.column);
-        int end = offset(source, range.end.line, range.end.column) + 1;
+        int start = SourceEdits.offset(source, range.begin.line, range.begin.column);
+        int end = SourceEdits.offset(source, range.end.line, range.end.column) + 1;
         String before = branch.getTokenRange().orElseThrow().toString();
         if (!source.substring(start, end).equals(before)) throw new IllegalArgumentException(
             "Не удалось точно сопоставить ветку с исходником. Преобразование отменено.");
@@ -52,13 +52,4 @@ public final class ConstantBranch {
             BlueprintParser.location(branch));
     }
 
-    static int offset(String source, int line, int column) {
-        int index = 0;
-        for (int current = 1; current < line; current++) {
-            while (index < source.length() && source.charAt(index) != '\n' && source.charAt(index) != '\r') index++;
-            if (index < source.length() && source.charAt(index++) == '\r'
-                    && index < source.length() && source.charAt(index) == '\n') index++;
-        }
-        return index + column - 1;
-    }
 }
