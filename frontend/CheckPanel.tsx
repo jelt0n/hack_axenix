@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Check, ChevronDown, ChevronUp, Clock3, FlaskConical, LoaderCircle, Play, Plus, X } from 'lucide-react';
 import { api } from './api';
-import type { CheckJob, ProgramResult, Project, Scenario } from './types';
+import type { AutomaticCheck, CheckJob, ProgramResult, Project, Scenario } from './types';
 
 function entryPoint(project: Project): string {
   const owners = [...new Set(project.methods.filter(method => method.name === 'main' && method.hasBody)
@@ -31,8 +31,8 @@ function ConsoleResult({ title, result }: { title: string; result: ProgramResult
   </div>;
 }
 
-export default function CheckPanel({ project, open, onToggle, pendingChanges = false }: {
-  project: Project; open: boolean; onToggle: () => void; pendingChanges?: boolean;
+export default function CheckPanel({ project, open, onToggle, pendingChanges = false, automaticCheck }: {
+  project: Project; open: boolean; onToggle: () => void; pendingChanges?: boolean; automaticCheck?: AutomaticCheck | null;
 }) {
   const [scenarios, setScenarios] = useState<Scenario[]>([{ name: 'Сценарий 1', stdin: '' }]);
   const [mainClass, setMainClass] = useState(() => entryPoint(project));
@@ -40,6 +40,9 @@ export default function CheckPanel({ project, open, onToggle, pendingChanges = f
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [available, setAvailable] = useState(false);
+  const lastAutomatic = useRef<number | null>(null);
+  const requestGeneration = useRef(0);
+  const displayedJobId = useRef<string | null>(null);
   const inferred = entryPoint(project);
   const previousInferred = useRef(inferred);
   const edited = useRef(false);
@@ -53,12 +56,15 @@ export default function CheckPanel({ project, open, onToggle, pendingChanges = f
 
   useEffect(() => {
     let live = true;
+    const generation = ++requestGeneration.current;
     edited.current = false;
+    displayedJobId.current = null;
     setJob(null); setError(null); setSending(false);
     setMainClass(entryPoint(project));
     setScenarios([{ name: 'Сценарий 1', stdin: '' }]);
     api.latestCheck(project.id).then(latest => {
-      if (!live) return;
+      if (!live || generation !== requestGeneration.current) return;
+      displayedJobId.current = latest.id;
       setJob(latest);
       if (!edited.current) {
         setScenarios(latest.scenarios);
@@ -91,9 +97,9 @@ export default function CheckPanel({ project, open, onToggle, pendingChanges = f
     const poll = async () => {
       try {
         const next = await api.check(job.id);
-        if (live) setJob(next);
+        if (live && displayedJobId.current === job.id) setJob(next);
       } catch (reason) {
-        if (live) setError(reason instanceof Error ? reason.message : 'Не удалось обновить проверку');
+        if (live && displayedJobId.current === job.id) setError(reason instanceof Error ? reason.message : 'Не удалось обновить проверку');
       }
       if (live) timer = setTimeout(poll, 900);
     };
@@ -107,14 +113,27 @@ export default function CheckPanel({ project, open, onToggle, pendingChanges = f
   }
 
   async function submit() {
+    const generation = ++requestGeneration.current;
+    edited.current = true;
     setSending(true); setError(null);
     try {
       const next = await api.createCheck(project, scenarios, mainClass);
-      if (projectIdentity.current === project.id) setJob(next);
+      if (projectIdentity.current === project.id && generation === requestGeneration.current) {
+        displayedJobId.current = next.id;
+        setJob(next);
+      }
     } catch (reason) {
-      if (projectIdentity.current === project.id) setError(reason instanceof Error ? reason.message : 'Не удалось создать проверку');
-    } finally { if (projectIdentity.current === project.id) setSending(false); }
+      if (projectIdentity.current === project.id && generation === requestGeneration.current) setError(reason instanceof Error ? reason.message : 'Не удалось создать проверку');
+    } finally { if (projectIdentity.current === project.id && generation === requestGeneration.current) setSending(false); }
   }
+
+  useEffect(() => {
+    if (!automaticCheck || lastAutomatic.current === automaticCheck.sequence
+        || automaticCheck.projectId !== project.id || automaticCheck.revision !== project.revision
+        || pendingChanges) return;
+    lastAutomatic.current = automaticCheck.sequence;
+    void submit();
+  }, [automaticCheck, project.id, project.revision, pendingChanges]);
 
   const tone = stale ? 'stale' : job?.result?.verdict === 'matched' ? 'matched'
     : job?.result?.verdict === 'different' ? 'different' : '';

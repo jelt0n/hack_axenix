@@ -99,6 +99,14 @@ public final class BlueprintParser {
         }
         if (edit != null) {
             if (selectedGraph == null) throw new EditRejected("Метод не найден. Обновите граф.");
+            if (edit.get("action").getAsString().equals("simplify-constant")) {
+                ConstantBranch.Change change;
+                try { change = ConstantBranch.apply(source, selectedGraph.origins.get(edit.get("nodeId").getAsString())); }
+                catch (IllegalArgumentException error) { throw new EditRejected(error.getMessage()); }
+                Map<String, Object> candidate = new LinkedHashMap<>(parse(change.source(), null, analyze));
+                candidate.put("transformation", Map.of("before", change.before(), "after", change.after(), "range", change.range()));
+                return candidate;
+            }
             selectedGraph.edit(edit, parser);
             return parse(LexicalPreservingPrinter.print(unit), null, analyze);
         }
@@ -405,6 +413,7 @@ public final class BlueprintParser {
             Map<String, Object> node = new LinkedHashMap<>();
             node.put("id", id); node.put("kind", kind); node.put("code", code);
             node.put("range", location(origin));
+            node.put("constantBranch", kind.equals("condition") && ConstantBranch.supportedCondition(origin));
             node.put("editable", !kind.equals("opaque") && (origin instanceof Statement statement && isEditableOperation(statement)
                 || (kind.equals("condition") || kind.equals("dispatch")) && origin instanceof Expression));
             Sequence container = origin instanceof Statement statement ? owners.get(statement) : null;

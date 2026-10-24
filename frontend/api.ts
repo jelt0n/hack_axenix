@@ -1,4 +1,4 @@
-import type { AnalysisReport, CheckJob, GraphEdit, MethodGraph, Project, Scenario } from './types';
+import type { BranchPreview, AnalysisReport, CheckJob, GraphEdit, MethodGraph, Project, Scenario } from './types';
 
 type FailureDetail = string | { message?: string; errors?: { message: string; line: number }[] }
   | { msg: string }[];
@@ -21,6 +21,19 @@ export class ApiError extends Error {
 }
 
 export const api = {
+  previewBranch: (id: string, revision: number, methodId: string, nodeId: string) => request<BranchPreview>(
+    `/api/projects/${encodeURIComponent(id)}/transformations/constant-branch/preview`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ revision, methodId, nodeId }),
+    },
+  ),
+  applyBranch: (preview: BranchPreview) => request<Project>(
+    `/api/projects/${encodeURIComponent(preview.projectId)}/transformations/constant-branch/apply`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ revision: preview.sourceRevision, methodId: preview.methodId,
+        nodeId: preview.nodeId, previewHash: preview.previewHash }),
+    },
+  ),
   analyze: (id: string, revision: number) => request<AnalysisReport>(
     `/api/projects/${encodeURIComponent(id)}/analysis`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revision }),

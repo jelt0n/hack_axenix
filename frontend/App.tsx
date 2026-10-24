@@ -10,9 +10,10 @@ import MethodGraph from './MethodGraph';
 import SourceView from './SourceView';
 import CheckPanel from './CheckPanel';
 import AnalysisPanel from './AnalysisPanel';
+import ConstantBranchPanel from './ConstantBranchPanel';
 import useWorkingCopy from './useWorkingCopy';
 import { sameMethod } from './methods';
-import type { AnalysisFinding, GraphNode, JavaMethod, MethodGraph as Graph, Project } from './types';
+import type { AutomaticCheck, BranchPreview, AnalysisFinding, GraphNode, JavaMethod, MethodGraph as Graph, Project } from './types';
 import '@xyflow/react/dist/style.css';
 import './style.css';
 
@@ -30,6 +31,8 @@ export default function App() {
   const [graphOnly, setGraphOnly] = useState(false);
   const [help, setHelp] = useState(false);
   const [checksOpen, setChecksOpen] = useState(false);
+  const [automaticCheck, setAutomaticCheck] = useState<AutomaticCheck | null>(null);
+  const checkSequence = useRef(0);
   const input = useRef<HTMLInputElement>(null);
   const analysisTarget = useRef<AnalysisFinding | null>(null);
   const method = project?.methods.find(item => item.id === methodId) ?? null;
@@ -49,6 +52,7 @@ export default function App() {
 
   function openProject(next: Project) {
     analysisTarget.current = null;
+    setAutomaticCheck(null);
     setProject(next);
     const remembered = sessionStorage.getItem(`method:${next.id}`);
     setMethodId(next.methods.find(item => item.id === remembered)?.id
@@ -126,6 +130,13 @@ export default function App() {
       analysisTarget.current = finding;
       setMethodId(finding.methodId);
     }
+  }
+
+  async function applyBranch(preview: BranchPreview) {
+    const changed = await editor.applyBranch(preview);
+    if (!changed) return;
+    setChecksOpen(true);
+    setAutomaticCheck({ projectId: changed.id, revision: changed.revision, sequence: ++checkSequence.current });
   }
 
   function exportSource() {
@@ -222,9 +233,12 @@ export default function App() {
               </div>
               <div className="workspace-note"><span><i />{project.methods.length} методов · ревизия {project.revision}</span>
                 <span>Исходная версия сохранена <Check size={12} /></span></div>
-              <AnalysisPanel key={project.id} project={project} pendingChanges={graphStale || editor.saving}
+              <ConstantBranchPanel key={`constant:${project.id}`} project={project} graph={graph} selected={selection}
+                disabled={graphStale || editor.saving || original || graphLoading}
+                onApply={applyBranch} onConflict={() => setRemoteChanged(true)} />
+              <AnalysisPanel key={`analysis:${project.id}`} project={project} pendingChanges={graphStale || editor.saving}
                 onNavigate={navigateFinding} onConflict={() => setRemoteChanged(true)} />
-              <CheckPanel project={project} open={checksOpen} onToggle={() => setChecksOpen(!checksOpen)} pendingChanges={remoteChanged || !!editor.conflict || editor.dirty || editor.saving} />
+              <CheckPanel project={project} open={checksOpen} onToggle={() => setChecksOpen(!checksOpen)} pendingChanges={remoteChanged || !!editor.conflict || editor.dirty || editor.saving} automaticCheck={automaticCheck} />
             </>}
           <footer className="app-footer"><span><GitBranch size={13} />Java ↔ граф</span><span>Исследуйте код. Сохраняйте смысл.</span><span>AXENIX HACKATHON <i>2026</i></span></footer>
         </main>

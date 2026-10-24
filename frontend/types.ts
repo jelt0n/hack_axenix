@@ -19,7 +19,7 @@ export type Diagnostic = { message: string; line: number; column: number };
 export type GraphNode = {
   id: string; kind: 'entry' | 'exit' | 'operation' | 'condition' | 'return' | 'opaque' | 'jump' | 'control' | 'dispatch' | 'exception' | 'completion';
   code: string; range: SourceRange;
-  editable?: boolean; containerId?: string; index?: number;
+  constantBranch?: boolean; editable?: boolean; containerId?: string; index?: number;
 };
 
 export type GraphContainer = { id: string; kind: string; label: string; size: number };
@@ -65,3 +65,9 @@ export type AnalysisReport = {
   methods: { methodId: string; signature: string; range: SourceRange;
     complexity: { label: string; explanation: string; assumptions: string[] } }[];
 };
+
+export type BranchPreview = {
+  projectId: string; sourceRevision: number; methodId: string; nodeId: string;
+  previewHash: string; before: string; after: string; range: SourceRange;
+};
+export type AutomaticCheck = { projectId: string; revision: number; sequence: number };

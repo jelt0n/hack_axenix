@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, ApiError } from './api';
-import type { GraphEdit, Project } from './types';
+import type { BranchPreview, GraphEdit, Project } from './types';
 
 type Draft = { id: string; source: string; baseRevision: number };
 const key = (id: string) => `java-draft:${id}`;
@@ -107,7 +107,7 @@ export default function useWorkingCopy(project: Project | null, onUpdate: (next:
     remember(next, conflict.generatedSource); onUpdate(conflict);
   }
 
-  async function editGraph(edit: GraphEdit) {
+  async function applySourceChange(change: (project: Project) => Promise<Project>) {
     const state = current.current;
     if (!state.project || operation.current || conflict) return;
     const id = state.project.id;
@@ -115,7 +115,7 @@ export default function useWorkingCopy(project: Project | null, onUpdate: (next:
     if (source !== state.project.generatedSource || state.project.revision !== state.project.graphRevision) return;
     const active = beginOperation(id);
     try {
-      const next = await api.editGraph(id, state.project.revision, edit);
+      const next = await change(state.project);
       if (!active()) return;
       const latest = current.current.draft;
       if (latest && latest.source !== source) {
@@ -127,6 +127,7 @@ export default function useWorkingCopy(project: Project | null, onUpdate: (next:
         current.current = { ...current.current, project: next, draft };
         setDraft(draft); setConflict(null); remember(draft, next.generatedSource);
         current.current.onUpdate(next);
+        return next;
       }
     } catch (reason) {
       await showFailure(id, active, reason, 'Не удалось изменить граф');
@@ -135,7 +136,17 @@ export default function useWorkingCopy(project: Project | null, onUpdate: (next:
     }
   }
 
+  async function editGraph(edit: GraphEdit) {
+    await applySourceChange(current => api.editGraph(current.id, current.revision, edit));
+  }
+
+  async function applyBranch(preview: BranchPreview) {
+    if (current.current.project?.id !== preview.projectId
+        || current.current.project?.revision !== preview.sourceRevision) return;
+    return applySourceChange(() => api.applyBranch(preview));
+  }
+
   const source = draft?.id === project?.id ? draft?.source ?? '' : project?.generatedSource ?? '';
   const dirty = !!project && source !== project.generatedSource;
-  return { source, dirty, saving, localSaved, error, conflict, changeSource, rebuild, useServerCopy, editGraph };
+  return { source, dirty, saving, localSaved, error, conflict, changeSource, rebuild, useServerCopy, editGraph, applyBranch };
 }
