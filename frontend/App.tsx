@@ -11,9 +11,10 @@ import SourceView from './SourceView';
 import CheckPanel from './CheckPanel';
 import AnalysisPanel from './AnalysisPanel';
 import ConstantBranchPanel from './ConstantBranchPanel';
+import ExtractMethodPanel from './ExtractMethodPanel';
 import useWorkingCopy from './useWorkingCopy';
 import { sameMethod } from './methods';
-import type { AutomaticCheck, BranchPreview, AnalysisFinding, GraphNode, JavaMethod, MethodGraph as Graph, Project } from './types';
+import type { ExtractionPreview, AutomaticCheck, BranchPreview, AnalysisFinding, GraphNode, JavaMethod, MethodGraph as Graph, Project } from './types';
 import '@xyflow/react/dist/style.css';
 import './style.css';
 
@@ -132,8 +133,8 @@ export default function App() {
     }
   }
 
-  async function applyBranch(preview: BranchPreview) {
-    const changed = await editor.applyBranch(preview);
+  async function applyTransformation(preview: BranchPreview | ExtractionPreview) {
+    const changed = await editor.applyTransformation(preview);
     if (!changed) return;
     setChecksOpen(true);
     setAutomaticCheck({ projectId: changed.id, revision: changed.revision, sequence: ++checkSequence.current });
@@ -235,7 +236,10 @@ export default function App() {
                 <span>Исходная версия сохранена <Check size={12} /></span></div>
               <ConstantBranchPanel key={`constant:${project.id}`} project={project} graph={graph} selected={selection}
                 disabled={graphStale || editor.saving || original || graphLoading}
-                onApply={applyBranch} onConflict={() => setRemoteChanged(true)} />
+                onApply={applyTransformation} onConflict={() => setRemoteChanged(true)} />
+              <ExtractMethodPanel key={`extract:${project.id}`} project={project} graph={graph} selected={selection}
+                disabled={graphStale || editor.saving || original || graphLoading}
+                onApply={applyTransformation} onConflict={() => setRemoteChanged(true)} />
               <AnalysisPanel key={`analysis:${project.id}`} project={project} pendingChanges={graphStale || editor.saving}
                 onNavigate={navigateFinding} onConflict={() => setRemoteChanged(true)} />
               <CheckPanel project={project} open={checksOpen} onToggle={() => setChecksOpen(!checksOpen)} pendingChanges={remoteChanged || !!editor.conflict || editor.dirty || editor.saving} automaticCheck={automaticCheck} />

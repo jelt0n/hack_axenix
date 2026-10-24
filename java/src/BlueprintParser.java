@@ -99,6 +99,14 @@ public final class BlueprintParser {
         }
         if (edit != null) {
             if (selectedGraph == null) throw new EditRejected("Метод не найден. Обновите граф.");
+            if (edit.get("action").getAsString().equals("extract-method")) {
+                ExtractMethod.Change change;
+                try { change = ExtractMethod.apply(source, selectedGraph.declaration, edit); }
+                catch (IllegalArgumentException error) { throw new EditRejected(error.getMessage()); }
+                Map<String, Object> candidate = new LinkedHashMap<>(parse(change.source(), null, analyze));
+                candidate.put("transformation", change.preview());
+                return candidate;
+            }
             if (edit.get("action").getAsString().equals("simplify-constant")) {
                 ConstantBranch.Change change;
                 try { change = ConstantBranch.apply(source, selectedGraph.origins.get(edit.get("nodeId").getAsString())); }

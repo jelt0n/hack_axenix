@@ -71,3 +71,8 @@ export type BranchPreview = {
   previewHash: string; before: string; after: string; range: SourceRange;
 };
 export type AutomaticCheck = { projectId: string; revision: number; sequence: number };
+
+export type ExtractionSelection = { methodId: string; startIndex: number; endIndex: number; methodName: string };
+export type ExtractionPreview = Omit<BranchPreview, 'nodeId'> & ExtractionSelection & {
+  newMethod: string; parameters: { name: string; type: string }[]; returnType: string; outputName: string;
+};
