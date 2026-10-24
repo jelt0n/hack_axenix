@@ -1,6 +1,7 @@
 import os
 import secrets
 from pathlib import Path
+from typing import Literal
 from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -45,6 +46,15 @@ class SourceRequest(RevisionRequest):
         if len(value.encode("utf-8")) > 256_000:
             raise ValueError("Исходник превышает 256 КБ UTF-8")
         return value
+
+
+class GraphEditRequest(RevisionRequest):
+    methodId: str = Field(min_length=1, max_length=120)
+    action: Literal["replace", "insert", "delete", "move"]
+    nodeId: str | None = Field(default=None, max_length=160)
+    containerId: str | None = Field(default=None, max_length=160)
+    index: int | None = Field(default=None, ge=0, le=10000)
+    code: str | None = Field(default=None, max_length=32768)
 
 
 def create_app(data_dir: Path | None = None) -> FastAPI:
@@ -193,6 +203,30 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             "projectRevision": project["revision"],
             "stale": project["graphRevision"] != project["revision"],
         }
+
+    @app.post("/api/projects/{project_id}/graph-edits")
+    def edit_graph(project_id: str, payload: GraphEditRequest, request: Request):
+        project = owned(request, project_id)
+        if (
+            payload.revision != project["revision"]
+            or project["graphRevision"] != project["revision"]
+        ):
+            raise HTTPException(409, "Граф устарел. Загрузите актуальную версию и обновите граф.")
+        try:
+            parsed = parse_java(
+                project["generatedSource"], edit=payload.model_dump(exclude_none=True)
+            )
+        except ParserUnavailable as exc:
+            raise HTTPException(503, str(exc)) from exc
+        if not parsed["ok"]:
+            raise HTTPException(422, {"message": "Правка отклонена", "errors": parsed["errors"]})
+        if len(parsed["generatedSource"].encode("utf-8")) > 256_000:
+            raise HTTPException(422, "После правки исходник превышает 256 КБ UTF-8")
+        return summary(
+            store.apply_graph_edit(
+                request.cookies.get(COOKIE, ""), project_id, payload.revision, parsed
+            )
+        )
 
     @app.get("/api/projects/{project_id}/export")
     def export_project(project_id: str, request: Request):

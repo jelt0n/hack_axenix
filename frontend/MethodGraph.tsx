@@ -4,7 +4,8 @@ import {
   ReactFlow, ReactFlowProvider, useReactFlow, type Node, type NodeProps,
 } from '@xyflow/react';
 import { ArrowDownToLine, GitBranch, Maximize2 } from 'lucide-react';
-import type { GraphNode, JavaMethod, MethodGraph as Graph } from './types';
+import type { GraphEdit, GraphNode, JavaMethod, MethodGraph as Graph } from './types';
+import GraphEditor from './GraphEditor';
 
 type BlueprintNode = Node<{ block: GraphNode }, 'blueprint'>;
 const labels: Record<GraphNode['kind'], string> = {
@@ -96,9 +97,10 @@ function GraphCanvas({ graph, selected, onSelect }: {
   );
 }
 
-export default function MethodGraph({ graph, method, selected, onSelect, loading, stale = false }: {
+export default function MethodGraph({ graph, method, selected, onSelect, loading, stale = false, editDisabled, onEdit }: {
   graph: Graph | null; method: JavaMethod | null; selected: string | null;
   onSelect: (block: GraphNode) => void; loading: boolean; stale?: boolean;
+  editDisabled: boolean; onEdit: (edit: GraphEdit) => Promise<void>;
 }) {
   return (
     <section className="graph-panel" aria-label="Граф метода">
@@ -118,6 +120,8 @@ export default function MethodGraph({ graph, method, selected, onSelect, loading
           <span>{stale ? 'Загрузите актуальную версию или разрешите конфликт сохранения.' : method ? 'Интерфейсы и абстрактные методы сохраняются в исходнике.' : 'Загрузите Java-файл или откройте пример.'}</span>
         </div>}
       {graph && graph.notices.length > 0 && <div className="graph-notice" role="note">{graph.notices[0]}</div>}
+      {graph && !loading && <GraphEditor graph={graph} selected={graph.nodes.find(node => node.id === selected) ?? null}
+        disabled={stale || editDisabled} onEdit={onEdit} />}
       <div className="graph-legend"><span><i className="legend-operation" />Операция</span>
         <span><i className="legend-condition" />Условие</span><span><i className="legend-return" />Возврат</span>
         <span className="legend-tip">Нажмите на блок → строка кода</span></div>

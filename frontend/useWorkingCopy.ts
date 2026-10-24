@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, ApiError } from './api';
-import type { Project } from './types';
+import type { GraphEdit, Project } from './types';
 
 type Draft = { id: string; source: string; baseRevision: number };
 const key = (id: string) => `java-draft:${id}`;
@@ -95,7 +95,44 @@ export default function useWorkingCopy(project: Project | null, onUpdate: (next:
     remember(next, conflict.generatedSource); onUpdate(conflict);
   }
 
+  async function editGraph(edit: GraphEdit) {
+    const state = current.current;
+    if (!state.project || operation.current || conflict) return;
+    const id = state.project.id;
+    const source = state.draft?.source ?? state.project.generatedSource;
+    if (source !== state.project.generatedSource || state.project.revision !== state.project.graphRevision) return;
+    const token = Symbol(); operation.current = token;
+    const active = () => operation.current === token && current.current.project?.id === id;
+    setSaving(true); setError(null);
+    try {
+      const next = await api.editGraph(id, state.project.revision, edit);
+      if (!active()) return;
+      const latest = current.current.draft;
+      if (latest && latest.source !== source) {
+        setConflict(next);
+        setError('Во время правки графа изменился текст. Черновик сохранён; выберите нужную версию.');
+        current.current.onUpdate(next);
+      } else {
+        const draft = { id, source: next.generatedSource, baseRevision: next.revision };
+        current.current = { ...current.current, project: next, draft };
+        setDraft(draft); setConflict(null); remember(draft, next.generatedSource);
+        current.current.onUpdate(next);
+      }
+    } catch (reason) {
+      if (!active()) return;
+      if (reason instanceof ApiError && reason.status === 409) {
+        try {
+          const remote = await api.project(id);
+          if (active()) setConflict(remote);
+        } catch { /* Keep the local copy and the conflict message. */ }
+      }
+      if (active()) setError(reason instanceof Error ? reason.message : 'Не удалось изменить граф');
+    } finally {
+      if (active()) { operation.current = null; setSaving(false); }
+    }
+  }
+
   const source = draft?.id === project?.id ? draft?.source ?? '' : project?.generatedSource ?? '';
   const dirty = !!project && source !== project.generatedSource;
-  return { source, dirty, saving, localSaved, error, conflict, changeSource, rebuild, useServerCopy };
+  return { source, dirty, saving, localSaved, error, conflict, changeSource, rebuild, useServerCopy, editGraph };
 }
