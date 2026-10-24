@@ -122,9 +122,13 @@ public final class BlueprintParser {
         final Map<String, Sequence> sequences = new LinkedHashMap<>();
         final Map<Statement, Sequence> owners = new IdentityHashMap<>();
         final Deque<Control> controls = new ArrayDeque<>();
-        record Flow(String id, boolean backEdge) {}
+        record Flow(String id, boolean backEdge, String completion) {
+            Flow(String id, boolean backEdge) { this(id, backEdge, ""); }
+        }
         record Control(Flow breakTo, Flow continueTo) {}
         String exit;
+        Flow returnTo;
+        Flow exceptionTo;
 
         Graph(String methodId, Node declaration) {
             this.methodId = methodId;
@@ -134,12 +138,14 @@ public final class BlueprintParser {
         Map<String, Object> build(Optional<BlockStmt> body) {
             if (body.isPresent()) {
                 exit = add("exit", "Конец метода", declaration);
+                returnTo = new Flow(exit, false);
+                exceptionTo = new Flow(exit, false);
                 Flow first = block(body.get(), new Flow(exit, false), "method", "Тело метода");
                 String entry = add("entry", "Вход в метод", declaration);
                 connect(entry, first, "");
             }
             return Map.of("methodId", methodId, "nodes", nodes, "edges", edges,
-                "notices", notices, "containers", sequences.values().stream().map(s -> s.publicData()).toList());
+                "notices", notices.stream().distinct().toList(), "containers", sequences.values().stream().map(s -> s.publicData()).toList());
         }
 
         Flow block(BlockStmt body, Flow next, String kind, String label) {
@@ -196,13 +202,14 @@ public final class BlueprintParser {
                 .filter(node -> node instanceof Expression)
                 .anyMatch(node -> node.findFirst(SwitchExpr.class).isPresent());
             if (switchExpression) {
-                return opaque(statement, terminal ? new Flow(exit, false) : next,
+                return opaque(statement, terminal ? statement.isThrowStmt() ? exceptionTo : returnTo : next,
                     "switch-выражение сохраняется целиком; его внутренний поток пока не раскрывается.");
             }
             if (statement.isBlockStmt()) {
                 return block(statement.asBlockStmt(), next, "block", "Блок, строка "
                     + statement.getBegin().orElseThrow().line);
             }
+            if (statement instanceof TryStmt attempt) return tryStatement(attempt, next);
             if (statement.isIfStmt()) {
                 IfStmt branch = statement.asIfStmt();
                 String id = add("condition", branch.getCondition().toString(), branch.getCondition());
@@ -307,8 +314,69 @@ public final class BlueprintParser {
                 notices.add("Конструкция в строке " + statement.getBegin().orElseThrow().line
                     + " показана целиком: внутренний поток управления пока не раскрыт.");
             }
-            connect(id, terminal ? new Flow(exit, false) : next, simple ? "" : "При продолжении");
+            connect(id, terminal ? statement.isThrowStmt() ? exceptionTo : returnTo : next,
+                simple ? "" : "При продолжении");
             return new Flow(id, false);
+        }
+
+        Flow tryStatement(TryStmt attempt, Flow next) {
+            if (!attempt.getResources().isEmpty()) {
+                return opaque(attempt, next, "try-with-resources сохраняется целиком; закрытие ресурсов пока не раскрывается.");
+            }
+            Flow outerReturn = returnTo;
+            Flow outerException = exceptionTo;
+            List<Control> outerControls = new ArrayList<>(controls);
+            Flow normal = next;
+            Flow exceptional = outerException;
+            if (attempt.getFinallyBlock().isPresent()) {
+                String frame = " [finally L" + attempt.getBegin().orElseThrow().line
+                    + ":" + attempt.getBegin().orElseThrow().column + "]";
+                String resume = add("completion", "Продолжить ожидающий переход", attempt);
+                // Finally runs under the outer context: an abrupt completion here
+                // replaces the saved return/throw/break/continue, as in Java.
+                Flow cleanup = block(attempt.getFinallyBlock().orElseThrow(),
+                    new Flow(resume, false), "finally", "finally, строка " + attempt.getBegin().orElseThrow().line);
+                connect(resume, next, "Если ожидается: normal" + frame);
+                connect(resume, outerReturn, "Если ожидается: return" + frame);
+                connect(resume, outerException, "Если ожидается: throw" + frame);
+                normal = new Flow(cleanup.id(), cleanup.backEdge(), "normal" + frame);
+                returnTo = new Flow(cleanup.id(), cleanup.backEdge(), "return" + frame);
+                exceptional = new Flow(cleanup.id(), cleanup.backEdge(), "throw" + frame);
+                controls.clear();
+                for (int i = 0; i < outerControls.size(); i++) {
+                    Control control = outerControls.get(i);
+                    String breakKind = "break-" + i + frame;
+                    connect(resume, control.breakTo(), "Если ожидается: " + breakKind);
+                    Flow breakTo = new Flow(cleanup.id(), cleanup.backEdge(), breakKind);
+                    Flow continueTo = null;
+                    if (control.continueTo() != null) {
+                        String continueKind = "continue-" + i + frame;
+                        connect(resume, control.continueTo(), "Если ожидается: " + continueKind);
+                        continueTo = new Flow(cleanup.id(), cleanup.backEdge(), continueKind);
+                    }
+                    controls.addLast(new Control(breakTo, continueTo));
+                }
+                notices.add("У каждого finally свой ожидающий переход: исходящие рёбра узла продолжения "
+                    + "зависят от сохранённого normal/return/throw/break/continue; это не свободный выбор ветки.");
+            }
+            exceptionTo = exceptional;
+            String handler = add("exception", "Выбрать обработчик исключения", attempt);
+            for (CatchClause caught : attempt.getCatchClauses()) {
+                Flow body = block(caught.getBody(), normal, "catch", "catch (" + caught.getParameter() + ")");
+                connect(handler, body, "Первый подходящий: " + caught.getParameter().getType());
+            }
+            connect(handler, exceptional, "Не перехвачено");
+            exceptionTo = new Flow(handler, false);
+            Flow body = block(attempt.getTryBlock(), normal, "try", "try, строка " + attempt.getBegin().orElseThrow().line);
+            returnTo = outerReturn;
+            exceptionTo = outerException;
+            controls.clear();
+            controls.addAll(outerControls);
+            String entry = add("exception", "try", attempt);
+            connect(entry, body, "");
+            notices.add("Рёбра исключений — возможные пути: выбор первого подходящего catch происходит "
+                + "во время выполнения Java; типы исключений статически не доказываются.");
+            return new Flow(entry, false);
         }
 
         String caseLabel(SwitchEntry entry) {
@@ -337,6 +405,10 @@ public final class BlueprintParser {
                 node.put("index", container.indexOf(origin));
             }
             nodes.add(node);
+            if (exceptionTo != null && !exceptionTo.id().equals(exit)
+                    && Set.of("operation", "condition", "control", "dispatch", "return").contains(kind)) {
+                connect(id, exceptionTo, "При исключении (возможный путь)");
+            }
             return id;
         }
 
@@ -534,7 +606,8 @@ public final class BlueprintParser {
 
         void connect(String from, Flow to, String label) {
             edges.add(Map.of("id", "edge-" + edges.size(), "source", from,
-                "target", to.id(), "label", label, "backEdge", to.backEdge()));
+                "target", to.id(), "label", label + (to.completion().isEmpty() ? "" : " · ожидать " + to.completion()),
+                "backEdge", to.backEdge()));
         }
     }
 }
