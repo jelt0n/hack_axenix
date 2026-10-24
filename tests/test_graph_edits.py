@@ -325,7 +325,7 @@ def test_move_distinguishes_repeated_identical_operations(tmp_path):
 
 
 def test_cross_scope_and_opaque_edits_are_rejected(tmp_path):
-    source = SOURCE.replace("value += 2;", "while (false) { value++; }")
+    source = SOURCE.replace("value += 2;", "synchronized (Demo.class) { value++; }")
     with TestClient(create_app(tmp_path)) as client:
         project, graph = import_graph(client, source)
         prefix = f"/api/projects/{project['id']}"
