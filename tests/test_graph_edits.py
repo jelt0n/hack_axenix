@@ -276,6 +276,29 @@ def test_empty_method_accepts_an_operation(tmp_path):
         assert 'System.out.println("hello");' in response.json()["generatedSource"]
 
 
+def test_adding_else_preserves_an_untouched_nested_method(tmp_path):
+    kept = "int  kept ( ) {return 7;}"
+    source = SOURCE.replace("} else {\n      value -= 2;\n    }", "}")
+    source = source.replace("value += 2;", "class Local { " + kept + " }\n      value += 2;")
+    with TestClient(create_app(tmp_path)) as client:
+        project, graph = import_graph(client, source)
+        branch = next(c for c in graph["containers"] if c["kind"] == "else")
+        response = client.post(
+            f"/api/projects/{project['id']}/graph-edits",
+            json={
+                "revision": 1,
+                "methodId": graph["methodId"],
+                "action": "insert",
+                "containerId": branch["id"],
+                "index": 0,
+                "code": "value += 0;",
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert kept in response.json()["generatedSource"]
+        assert response.json()["originalSource"] == source
+
+
 def test_move_distinguishes_repeated_identical_operations(tmp_path):
     source = (
         "class Demo { public static void main(String[] a) {"

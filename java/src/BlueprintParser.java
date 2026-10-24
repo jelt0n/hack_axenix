@@ -176,8 +176,7 @@ public final class BlueprintParser {
                 return id;
             }
             boolean terminal = statement.isReturnStmt() || statement.isThrowStmt();
-            boolean simple = terminal || statement.isExpressionStmt() || statement.isEmptyStmt()
-                || statement.isAssertStmt();
+            boolean simple = isEditableOperation(statement);
             String kind = terminal ? "return" : simple ? "operation" : "opaque";
             String code = statement.getTokenRange().map(Object::toString).orElse(statement.toString());
             String id = add(kind, code, statement);
@@ -205,6 +204,11 @@ public final class BlueprintParser {
             return id;
         }
 
+        static boolean isEditableOperation(Statement statement) {
+            return statement.isExpressionStmt() || statement.isReturnStmt() || statement.isThrowStmt()
+                || statement.isEmptyStmt() || statement.isAssertStmt();
+        }
+
         Statement operation(JsonObject request, JavaParser parser) {
             if (!request.has("code") || request.get("code").getAsString().isBlank()) {
                 throw new EditRejected("Введите Java-код блока.");
@@ -214,8 +218,7 @@ public final class BlueprintParser {
                 throw new EditRejected("Введите одну корректную операцию Java с точкой с запятой.");
             }
             Statement value = parsed.getResult().orElseThrow();
-            if (!(value.isExpressionStmt() || value.isReturnStmt() || value.isThrowStmt()
-                    || value.isEmptyStmt() || value.isAssertStmt())) {
+            if (!isEditableOperation(value)) {
                 throw new EditRejected("Здесь поддерживается одна операция; структуры управления редактируются отдельно.");
             }
             return value;
@@ -226,9 +229,7 @@ public final class BlueprintParser {
             if (action.equals("delete") || action.equals("move")) {
                 Node target = request.has("nodeId") ? origins.get(request.get("nodeId").getAsString()) : null;
                 Sequence container = target instanceof Statement statement ? owners.get(statement) : null;
-                if (container == null || !(target instanceof Statement statement)
-                        || !(statement.isExpressionStmt() || statement.isReturnStmt() || statement.isThrowStmt()
-                            || statement.isEmptyStmt() || statement.isAssertStmt())) {
+                if (container == null || !(target instanceof Statement statement) || !isEditableOperation(statement)) {
                     throw new EditRejected("Удалить или переместить можно только отдельную операцию актуального графа.");
                 }
                 List<Statement> statements = new ArrayList<>(container.statements());
@@ -332,22 +333,39 @@ public final class BlueprintParser {
                 validate(statements);
                 if (block != null) block.setStatements(new NodeList<>(statements));
                 else if (otherwise && branch.getElseStmt().isEmpty()) {
-                    // JavaParser 3.27.1 cannot lexically add an else to an unbraced if.
-                    // Replace only that if; braces also prevent dangling-else reassociation.
-                    IfStmt replacement = parser.parseStatement(branch.toString()).getResult()
-                        .orElseThrow(() -> new EditRejected("Не удалось дополнить ветку if/else.")).asIfStmt();
-                    if (!replacement.getThenStmt().isBlockStmt()) {
-                        replacement.setThenStmt(new BlockStmt(new NodeList<>(replacement.getThenStmt().clone())));
-                    }
-                    NodeList<Statement> body = new NodeList<>();
-                    for (Statement statement : statements) body.add(statement.clone());
-                    replacement.setElseStmt(new BlockStmt(body));
-                    branch.replace(replacement);
+                    addElse(statements, parser);
                 }
                 else {
                     BlockStmt replacement = new BlockStmt(new NodeList<>(statements));
                     if (otherwise) branch.setElseStmt(replacement); else branch.setThenStmt(replacement);
                 }
+            }
+
+            void addElse(List<Statement> statements, JavaParser parser) {
+                // Avoid JavaParser 3.27.1's CsmIndent failure when introducing else.
+                // Keep existing tokens, including formatting of untouched nested methods.
+                String original = branch.getTokenRange().orElseThrow().toString();
+                if (!branch.getThenStmt().isBlockStmt()) {
+                    StringBuilder prefix = new StringBuilder();
+                    var beginning = branch.getThenStmt().getTokenRange().orElseThrow().getBegin();
+                    for (var token : branch.getTokenRange().orElseThrow()) {
+                        if (token == beginning) break;
+                        prefix.append(token.getText());
+                    }
+                    // Braces prevent a new outer else from attaching to a nested if.
+                    original = prefix + "{\n" + branch.getThenStmt().getTokenRange().orElseThrow() + "\n}";
+                }
+                StringBuilder body = new StringBuilder();
+                for (Statement statement : statements) {
+                    body.append(statement.getTokenRange().map(Object::toString).orElse(statement.toString())).append('\n');
+                }
+                var parsed = parser.parseStatement(original + " else {\n" + body + "}");
+                if (!parsed.isSuccessful() || parsed.getResult().isEmpty()) {
+                    throw new EditRejected("Не удалось дополнить ветку if/else.");
+                }
+                Statement replacement = parsed.getResult().orElseThrow();
+                LexicalPreservingPrinter.setup(replacement);
+                branch.replace(replacement);
             }
 
             Map<String, Object> publicData() {

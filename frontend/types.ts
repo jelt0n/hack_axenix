@@ -23,10 +23,12 @@ export type GraphNode = {
 };
 
 export type GraphContainer = { id: string; kind: string; label: string; size: number };
-export type GraphEdit = {
-  methodId: string; action: 'replace' | 'insert' | 'delete' | 'move';
-  nodeId?: string; containerId?: string; index?: number; code?: string;
-};
+export type GraphAction =
+  | { action: 'replace'; nodeId: string; code: string }
+  | { action: 'insert'; containerId: string; index: number; code: string }
+  | { action: 'delete'; nodeId: string }
+  | { action: 'move'; nodeId: string; containerId: string; index: number };
+export type GraphEdit = GraphAction & { methodId: string };
 
 export type MethodGraph = {
   methodId: string; nodes: GraphNode[];

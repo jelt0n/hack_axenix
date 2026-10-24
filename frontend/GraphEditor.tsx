@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { GraphEdit, GraphNode, MethodGraph } from './types';
+import type { GraphAction, GraphEdit, GraphNode, MethodGraph } from './types';
 
 export default function GraphEditor({ graph, selected, disabled, onEdit }: {
   graph: MethodGraph; selected: GraphNode | null; disabled: boolean;
@@ -16,7 +16,7 @@ export default function GraphEditor({ graph, selected, disabled, onEdit }: {
   const selectedContainer = containers.find(item => item.id === selected?.containerId);
   const position = selected?.index;
   const movable = !!selected?.editable && !!selectedContainer && position !== undefined;
-  const submit = (edit: Omit<GraphEdit, 'methodId'>) => void onEdit({ ...edit, methodId: graph.methodId });
+  const submit = (edit: GraphAction) => void onEdit({ ...edit, methodId: graph.methodId });
 
   function startAdding() {
     const target = selectedContainer ?? containers[0];
@@ -38,9 +38,9 @@ export default function GraphEditor({ graph, selected, disabled, onEdit }: {
             onClick={() => submit({ action: 'replace', nodeId: selected.id, code })}>Применить правку</button>
           {movable && <>
             <button className="button secondary" disabled={position === 0}
-              onClick={() => submit({ action: 'move', nodeId: selected.id, containerId: selected.containerId, index: position! - 1 })}>Переместить выше</button>
+              onClick={() => submit({ action: 'move', nodeId: selected.id, containerId: selectedContainer!.id, index: position! - 1 })}>Переместить выше</button>
             <button className="button secondary" disabled={position! >= selectedContainer!.size - 1}
-              onClick={() => submit({ action: 'move', nodeId: selected.id, containerId: selected.containerId, index: position! + 2 })}>Переместить ниже</button>
+              onClick={() => submit({ action: 'move', nodeId: selected.id, containerId: selectedContainer!.id, index: position! + 2 })}>Переместить ниже</button>
             <button className="button secondary" onClick={() => submit({ action: 'delete', nodeId: selected.id })}>Удалить операцию</button>
           </>}
         </div>
