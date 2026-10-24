@@ -1,0 +1,53 @@
+services:
+  api:
+    image: java-blueprints-api:dev
+    build:
+      context: .
+      target: api
+    ports:
+      - "127.0.0.1:${BLUEPRINTS_PORT:-8000}:8000"
+    volumes:
+      - projects:/data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=32m
+      - /app/.cache/java/classes:rw,nosuid,nodev,size=16m,uid=1000,gid=1000
+    mem_limit: 768m
+    pids_limit: 128
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "2"
+
+  worker:
+    image: java-blueprints-worker:dev
+    build:
+      context: .
+      target: worker
+    depends_on:
+      api:
+        condition: service_healthy
+    volumes:
+      - projects:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    group_add:
+      - "${DOCKER_GID:?Set DOCKER_GID to the docker socket group ID}"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=32m
+    mem_limit: 256m
+    pids_limit: 64
+    restart: unless-stopped
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "2"
+
+volumes:
+  projects:

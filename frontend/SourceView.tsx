@@ -21,6 +21,7 @@ export default function SourceView({ project, method, selection, blocks, onSelec
   const [scrollTop, setScrollTop] = useState(0);
   const [height, setHeight] = useState(400);
   const source = original ? project.originalSource : project.generatedSource;
+  const highlightedRange = selection ?? method?.range ?? null;
   const lines = useMemo(() => source.split(/\r\n|\r|\n/), [source]);
   const widest = useMemo(() => lines.reduce((length, line) => Math.max(length, line.length), 0), [lines]);
   useEffect(() => {
@@ -71,9 +72,9 @@ export default function SourceView({ project, method, selection, blocks, onSelec
   const last = Math.min(lines.length, Math.ceil((scrollTop + height) / LINE_HEIGHT) + OVERSCAN);
 
   function lineContent(text: string, line: number) {
-    if (!selection || line < selection.startLine || line > selection.endLine) return <Line text={text || ' '} />;
-    const start = line === selection.startLine ? selection.startColumn - 1 : 0;
-    const end = line === selection.endLine ? selection.endColumn : text.length;
+    if (!highlightedRange || line < highlightedRange.startLine || line > highlightedRange.endLine) return <Line text={text || ' '} />;
+    const start = line === highlightedRange.startLine ? highlightedRange.startColumn - 1 : 0;
+    const end = line === highlightedRange.endLine ? highlightedRange.endColumn : text.length;
     return <><Line text={text.slice(0, start)} /><mark className="source-highlight"><Line text={text.slice(start, end)} /></mark><Line text={text.slice(end)} /></>;
   }
   return (
@@ -82,13 +83,13 @@ export default function SourceView({ project, method, selection, blocks, onSelec
         <div className="source-tabs"><button className={!original ? 'active' : ''} onClick={() => onOriginal(false)}>Сгенерированный</button>
           <button className={original ? 'active' : ''} onClick={() => onOriginal(true)}>Исходный</button></div></div>
       <div className="source-path"><span>{project.packageName ? project.packageName.replaceAll('.', ' / ') + ' / ' : ''}{project.filename}</span>
-        <span>JAVA</span></div>
+        <span aria-label="Метод в окне кода" title={method?.signature}>{method?.signature ?? 'JAVA'}</span></div>
       <div className="source-scroll" ref={viewport} tabIndex={0} aria-label="Код программы"
         onScroll={event => setScrollTop(event.currentTarget.scrollTop)}>
         <div className="source-lines" style={{ height: lines.length * LINE_HEIGHT, minWidth: widest * 7 + 90 }}>
           <div style={{ height: first * LINE_HEIGHT }} aria-hidden="true" />
           {lines.slice(first, last).map((line, index) => { const i = first + index; return <div key={i} data-testid={`source-line-${i + 1}`}
-          className={`source-line ${selection && i + 1 >= selection.startLine && i + 1 <= selection.endLine ? 'highlighted' : ''}`}
+          className={`source-line ${highlightedRange && i + 1 >= highlightedRange.startLine && i + 1 <= highlightedRange.endLine ? 'highlighted' : ''}`}
           onClick={event => selectLine(event, i + 1)}>
           <span className="line-number">{i + 1}</span><code>{lineContent(line, i + 1)}</code>
         </div>; })}</div>

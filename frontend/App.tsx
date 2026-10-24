@@ -2,12 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import {
   ArrowDownToLine, ArrowRight, BookOpen, Box, Braces, Check, ChevronDown,
   ChevronRight, CircleHelp, FileCode2, FolderOpen, GitBranch, Layers3,
-  LoaderCircle, PanelLeftClose, Upload, X,
+  LoaderCircle, PanelLeftClose, Play, Upload, X,
 } from 'lucide-react';
 import { api } from './api';
 import { exampleSource } from './example';
 import MethodGraph from './MethodGraph';
 import SourceView from './SourceView';
+import CheckPanel from './CheckPanel';
 import type { GraphNode, JavaMethod, MethodGraph as Graph, Project } from './types';
 import '@xyflow/react/dist/style.css';
 import './style.css';
@@ -24,6 +25,7 @@ export default function App() {
   const [original, setOriginal] = useState(false);
   const [graphOnly, setGraphOnly] = useState(false);
   const [help, setHelp] = useState(false);
+  const [checksOpen, setChecksOpen] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const method = project?.methods.find(item => item.id === methodId) ?? null;
 
@@ -119,7 +121,8 @@ export default function App() {
             <div className="breadcrumbs">Рабочая область <ChevronRight size={13} /><span>{project?.filename || 'Начало работы'}</span></div>
             <div className="toolbar-actions"><button className="button secondary" onClick={() => input.current?.click()} disabled={busy}>
               {busy ? <LoaderCircle size={15} className="spin" /> : <Upload size={15} />}Импорт Java</button>
-              <button className="button primary" aria-label="Экспорт Java" onClick={exportSource} disabled={!project || busy}><ArrowDownToLine size={15} />Экспорт Java</button></div>
+              <button className="button secondary" aria-label="Экспорт Java" onClick={exportSource} disabled={!project || busy}><ArrowDownToLine size={15} />Экспорт Java</button>
+              {project && <button className="button primary" aria-label="Проверить поведение" onClick={() => setChecksOpen(true)}><Play size={14} />Проверить</button>}</div>
           </div>
 
           {error && <div className="error-banner" role="alert"><span><strong>Не удалось загрузить файл.</strong> {error}</span>
@@ -148,6 +151,7 @@ export default function App() {
               </div>
               <div className="workspace-note"><span><i />{project.methods.length} методов · ревизия {project.revision}</span>
                 <span>Исходная версия сохранена <Check size={12} /></span></div>
+              <CheckPanel project={project} open={checksOpen} onToggle={() => setChecksOpen(!checksOpen)} />
             </>}
           <footer className="app-footer"><span><GitBranch size={13} />Java ↔ граф</span><span>Исследуйте код. Сохраняйте смысл.</span><span>AXENIX HACKATHON <i>2026</i></span></footer>
         </main>
@@ -158,7 +162,7 @@ export default function App() {
         <ol><li><strong>Загрузите .java</strong><p>Исходная версия сохраняется отдельно от сгенерированного кода.</p></li>
           <li><strong>Выберите метод</strong><p>Граф показывает последовательности и if/else. Остальные конструкции пока отображаются целыми блоками с пояснением.</p></li>
           <li><strong>Исследуйте и скачайте</strong><p>Нажмите на блок, чтобы найти строку кода. Экспорт сохраняет комментарии и оформление.</p></li></ol>
-        <div className="help-note">На этом этапе программа разбирается, но не запускается. Совпадение поведения ещё не проверялось. Проекты временные и хранятся до 24 часов.</div>
+        <div className="help-note">В разделе «Проверка поведения» обе версии выполняются на одинаковых входах в отдельном исполнителе. Результат относится только к выбранным сценариям. Проекты временные и хранятся до 24 часов.</div>
         <button className="button primary" onClick={() => setHelp(false)}>Понятно <ArrowRight size={15} /></button>
       </section></div>}
     </div>

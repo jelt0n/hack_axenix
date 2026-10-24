@@ -22,3 +22,20 @@ export type MethodGraph = {
   edges: { id: string; source: string; target: string; label: string }[];
   notices: string[];
 };
+
+export type Scenario = { name: string; stdin: string };
+export type ProgramResult = {
+  status: string; stdout: string; stderr: string; exitCode: number | null; durationMs: number;
+  exception: { type: string; message: string | null } | null; stackTrace: string;
+};
+export type CheckJob = {
+  id: string; projectId: string; sourceRevision: number; createdAt: number;
+  status: 'queued' | 'running' | 'completed' | 'failed'; phase: string;
+  queuePosition: number | null; mainClass: string; scenarios: Scenario[];
+  result: {
+    verdict: 'matched' | 'different' | 'inconclusive';
+    cases: { name: string; stdin: string; original: ProgramResult | null;
+      working: ProgramResult | null; matches: boolean }[];
+    error?: { kind: string; message: string };
+  } | null;
+};
