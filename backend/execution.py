@@ -140,9 +140,10 @@ class ProgramResult:
 
 
 class DockerExecutor:
-    def __init__(self, deployment: str, image: str = IMAGE):
+    def __init__(self, deployment: str, image: str | None = None):
         self.deployment = deployment
         self.docker = os.environ.get("BLUEPRINTS_DOCKER_BIN", "docker")
+        image = image or os.environ.get("BLUEPRINTS_RUNNER_IMAGE", IMAGE)
         result = self.control(["image", "inspect", image, "--format", "{{.Id}}"])
         self.image = result.stdout.decode().strip()
         if not self.image.startswith("sha256:"):
