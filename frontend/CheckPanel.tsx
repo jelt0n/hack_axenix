@@ -31,8 +31,8 @@ function ConsoleResult({ title, result }: { title: string; result: ProgramResult
   </div>;
 }
 
-export default function CheckPanel({ project, open, onToggle }: {
-  project: Project; open: boolean; onToggle: () => void;
+export default function CheckPanel({ project, open, onToggle, pendingChanges = false }: {
+  project: Project; open: boolean; onToggle: () => void; pendingChanges?: boolean;
 }) {
   const [scenarios, setScenarios] = useState<Scenario[]>([{ name: 'Сценарий 1', stdin: '' }]);
   const [mainClass, setMainClass] = useState(() => entryPoint(project));
@@ -40,11 +40,15 @@ export default function CheckPanel({ project, open, onToggle }: {
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [available, setAvailable] = useState(false);
+  const inferred = entryPoint(project);
+  const previousInferred = useRef(inferred);
   const edited = useRef(false);
   const projectIdentity = useRef(project.id);
   projectIdentity.current = project.id;
+  const currentProject = useRef(project);
+  currentProject.current = project;
   const active = job?.status === 'queued' || job?.status === 'running';
-  const stale = !!job && (job.sourceRevision !== project.revision || job.projectId !== project.id
+  const stale = !!job && (pendingChanges || job.sourceRevision !== project.revision || job.projectId !== project.id
     || job.mainClass !== mainClass || JSON.stringify(job.scenarios) !== JSON.stringify(scenarios));
 
   useEffect(() => {
@@ -56,10 +60,20 @@ export default function CheckPanel({ project, open, onToggle }: {
     api.latestCheck(project.id).then(latest => {
       if (!live) return;
       setJob(latest);
-      if (!edited.current) { setScenarios(latest.scenarios); setMainClass(latest.mainClass); }
+      if (!edited.current) {
+        setScenarios(latest.scenarios);
+        setMainClass(latest.sourceRevision === currentProject.current.revision
+          ? latest.mainClass : entryPoint(currentProject.current));
+      }
     }).catch(() => {});
     return () => { live = false; };
   }, [project.id]);
+
+  useEffect(() => {
+    const previous = previousInferred.current;
+    setMainClass(current => current === previous ? inferred : current);
+    previousInferred.current = inferred;
+  }, [inferred]);
 
   useEffect(() => {
     let live = true;
@@ -109,7 +123,7 @@ export default function CheckPanel({ project, open, onToggle }: {
       <FlaskConical size={17} /><strong>Проверка поведения</strong>{open ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
     </button><span className={`check-status ${tone}`} data-testid="check-status" aria-live="polite">
       {active ? <LoaderCircle size={12} className="spin" /> : job?.result?.verdict === 'matched' && !stale ? <Check size={12} /> : <Clock3 size={12} />}
-      {stale ? 'Результат предыдущих входов' : statusLabel(job)}
+      {stale ? pendingChanges || job?.sourceRevision !== project.revision ? 'Результат предыдущей версии' : 'Результат предыдущих входов' : statusLabel(job)}
     </span></div>
     {open && <div className="checks-body">
       <div className="checks-form"><div className="checks-intro">Одинаковые входы для исходной и рабочей версий. Проверка относится к ревизии {project.revision}.</div>
@@ -128,9 +142,10 @@ export default function CheckPanel({ project, open, onToggle }: {
           edited.current = true; setScenarios(items => [...items, { name: `Сценарий ${items.length + 1}`, stdin: '' }]);
         }}><Plus size={13} />Сценарий</button>
           <button className="button primary" aria-label="Запустить проверку" onClick={() => void submit()}
-            disabled={sending || active || !mainClass.trim() || scenarios.some(s => !s.name.trim())}>
+            disabled={pendingChanges || sending || active || !mainClass.trim() || scenarios.some(s => !s.name.trim())}>
             {sending || active ? <LoaderCircle size={14} className="spin" /> : <Play size={14} />}Запустить проверку</button></div>
         <div className={`runner-availability ${available ? 'online' : ''}`}><i />{available ? 'Исполнитель готов' : 'Исполнитель недоступен. Задание останется в очереди.'}</div>
+        {pendingChanges && <div className="check-warning">Сначала сохраните код кнопкой «Обновить граф».</div>}
       </div>
       <div className="checks-output" data-testid="check-results">
         {error && <div className="check-error" role="alert"><AlertTriangle size={15} /><span>{error}</span></div>}

@@ -6,11 +6,11 @@ from urllib.parse import quote
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend.checks import CheckQueue, CheckRequest, QueueFull
 from backend.java_parser import ParserUnavailable, parse_java
-from backend.projects import ProjectStore, summary
+from backend.projects import ProjectNotFound, ProjectStore, RevisionConflict, summary
 
 ROOT = Path(__file__).resolve().parents[1]
 COOKIE = "blueprints_session"
@@ -31,11 +31,38 @@ class ImportProject(BaseModel):
         return value
 
 
+class RevisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    revision: int = Field(ge=1)
+
+
+class SourceRequest(RevisionRequest):
+    source: str = Field(max_length=256_000)
+
+    @field_validator("source")
+    @classmethod
+    def source_size(cls, value: str) -> str:
+        if len(value.encode("utf-8")) > 256_000:
+            raise ValueError("Исходник превышает 256 КБ UTF-8")
+        return value
+
+
 def create_app(data_dir: Path | None = None) -> FastAPI:
     app = FastAPI(title="Java Blueprints", version="0.1.0")
     directory = data_dir or Path(os.environ.get("BLUEPRINTS_DATA_DIR", ROOT / ".data"))
     store = ProjectStore(directory)
     checks = CheckQueue(directory)
+
+    @app.exception_handler(RevisionConflict)
+    async def revision_conflict(request: Request, exc: RevisionConflict):
+        return JSONResponse(
+            {"detail": "Версия проекта изменилась. Загрузите актуальную версию перед сохранением."},
+            409,
+        )
+
+    @app.exception_handler(ProjectNotFound)
+    async def project_not_found(request: Request, exc: ProjectNotFound):
+        return JSONResponse({"detail": "Проект не найден или срок хранения истёк"}, 404)
 
     @app.middleware("http")
     async def limit_request(request: Request, call_next):
@@ -134,13 +161,38 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     def get_project(project_id: str, request: Request):
         return summary(owned(request, project_id))
 
+    @app.post("/api/projects/{project_id}/source")
+    def save_source(project_id: str, payload: SourceRequest, request: Request):
+        project = store.save_source(
+            request.cookies.get(COOKIE, ""), project_id, payload.revision, payload.source
+        )
+        return summary(project)
+
+    @app.post("/api/projects/{project_id}/rebuild")
+    def rebuild(project_id: str, payload: RevisionRequest, request: Request):
+        project = owned(request, project_id)
+        if project["revision"] != payload.revision:
+            raise RevisionConflict
+        try:
+            parsed = parse_java(project["generatedSource"])
+        except ParserUnavailable as exc:
+            raise HTTPException(503, str(exc)) from exc
+        return summary(
+            store.rebuild(request.cookies.get(COOKIE, ""), project_id, payload.revision, parsed)
+        )
+
     @app.get("/api/projects/{project_id}/methods/{method_id}/graph")
     def get_graph(project_id: str, method_id: str, request: Request):
         project = owned(request, project_id)
         graph = project["graphs"].get(method_id)
         if graph is None:
             raise HTTPException(404, "Метод не найден")
-        return graph
+        return {
+            **graph,
+            "sourceRevision": project["graphRevision"],
+            "projectRevision": project["revision"],
+            "stale": project["graphRevision"] != project["revision"],
+        }
 
     @app.get("/api/projects/{project_id}/export")
     def export_project(project_id: str, request: Request):

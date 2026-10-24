@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { spawn } from 'node:child_process';
+import { replaceJavaSource } from './support/editor';
 
 test('настоящий Docker-исполнитель показывает вывод и отмечает изменённые входы', async ({ page }) => {
   test.skip(!process.env.BLUEPRINTS_DOCKER_BIN, 'Запустите scripts/test_runner.py --browser с доступным Docker');
@@ -37,6 +38,19 @@ test('настоящий Docker-исполнитель показывает вы
     await page.getByLabel('Ввод сценария 1').fill('Другой вход\n');
     await expect(page.getByTestId('check-status')).toContainText('Результат предыдущих входов');
     await expect(page.locator('.verdict')).toHaveClass(/stale/);
+    await page.getByLabel('Ввод сценария 1').fill('Привет из Docker\n');
+    await page.getByRole('button', { name: 'Редактировать Java', exact: true }).click();
+    await replaceJavaSource(page, source.replace('System.out.println(', 'System.out.println("Изменено: " + '));
+    await expect(page.getByTestId('check-status')).toContainText('Результат предыдущей версии');
+    await expect(page.getByRole('button', { name: 'Запустить проверку', exact: true })).toBeDisabled();
+    await page.getByRole('button', { name: 'Обновить граф', exact: true }).click();
+    await expect(page.getByText('Код сохранён · ревизия 2', { exact: true })).toBeVisible();
+    await expect(page.locator('.verdict')).toHaveClass(/stale/);
+    await page.getByRole('button', { name: 'Запустить проверку', exact: true }).click();
+    await expect(page.getByTestId('check-status')).toContainText('Есть различия', { timeout: 60000 });
+    await expect(first.getByLabel('Исходная версия: stdout')).toHaveText('Привет из Docker');
+    await expect(first.getByLabel('Рабочая версия: stdout')).toHaveText('Изменено: Привет из Docker');
+    await page.locator('#checks-panel').screenshot({ path: '.cache/screenshots/editing-different.png' });
   } finally {
     if (worker.exitCode === null) {
       worker.kill('SIGINT');

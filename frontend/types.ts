@@ -10,7 +10,11 @@ export type JavaMethod = {
 export type Project = {
   id: string; filename: string; revision: number; originalSource: string;
   generatedSource: string; packageName: string; methods: JavaMethod[];
+  graphRevision: number; modelSource: string; originalMethods: JavaMethod[];
+  originalPackageName: string; diagnostics: Diagnostic[];
 };
+
+export type Diagnostic = { message: string; line: number; column: number };
 
 export type GraphNode = {
   id: string; kind: 'entry' | 'exit' | 'operation' | 'condition' | 'return' | 'opaque';
@@ -19,6 +23,7 @@ export type GraphNode = {
 
 export type MethodGraph = {
   methodId: string; nodes: GraphNode[];
+  sourceRevision: number; projectRevision: number; stale: boolean;
   edges: { id: string; source: string; target: string; label: string }[];
   notices: string[];
 };

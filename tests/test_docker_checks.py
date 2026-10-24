@@ -52,6 +52,29 @@ def test_real_worker_compiles_and_compares_utf8_inputs(tmp_path):
         assert all(case["original"]["exitCode"] == 0 for case in result["result"]["cases"])
 
 
+def test_saved_revision_compares_changed_working_code_against_immutable_original(tmp_path):
+    with TestClient(create_app(tmp_path)) as client:
+        project = client.post(
+            "/api/projects", json={"filename": "Echo.java", "source": ECHO}
+        ).json()
+        prefix = f"/api/projects/{project['id']}"
+        changed = ECHO.replace("System.out.println(", 'System.out.println("Изменено: " + ')
+        client.post(prefix + "/source", json={"revision": 1, "source": changed})
+        rebuilt = client.post(prefix + "/rebuild", json={"revision": 2}).json()
+        assert rebuilt["graphRevision"] == 2
+        payload = {"revision": 1, "scenarios": [{"name": "Новая ревизия", "stdin": "Привет\n"}]}
+        assert client.post(prefix + "/checks", json=payload).status_code == 409
+        payload["revision"] = 2
+        job = client.post(prefix + "/checks", json=payload).json()
+        run_worker(tmp_path, once=True)
+        completed = client.get(f"/api/checks/{job['id']}").json()
+        assert completed["sourceRevision"] == 2
+        assert completed["result"]["verdict"] == "different"
+        case = completed["result"]["cases"][0]
+        assert case["original"]["stdout"] == "Привет\n"
+        assert case["working"]["stdout"] == "Изменено: Привет\n"
+
+
 @pytest.mark.parametrize(
     "body,kind",
     [

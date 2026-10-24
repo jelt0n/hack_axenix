@@ -2,6 +2,7 @@
   "name": "java-blueprints",
   "version": "0.1.0",
   "private": true,
+  "overrides": { "dompurify": "3.4.17" },
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
@@ -12,6 +13,7 @@
   "dependencies": {
     "@xyflow/react": "^12.9.0",
     "lucide-react": "^0.468.0",
+    "monaco-editor": "^0.56.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },

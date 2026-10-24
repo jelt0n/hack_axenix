@@ -4,11 +4,13 @@ import {
   ChevronRight, CircleHelp, FileCode2, FolderOpen, GitBranch, Layers3,
   LoaderCircle, PanelLeftClose, Play, Upload, X,
 } from 'lucide-react';
-import { api } from './api';
+import { api, ApiError } from './api';
 import { exampleSource } from './example';
 import MethodGraph from './MethodGraph';
 import SourceView from './SourceView';
 import CheckPanel from './CheckPanel';
+import useWorkingCopy from './useWorkingCopy';
+import { sameMethod } from './methods';
 import type { GraphNode, JavaMethod, MethodGraph as Graph, Project } from './types';
 import '@xyflow/react/dist/style.css';
 import './style.css';
@@ -21,6 +23,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [restoring, setRestoring] = useState(true);
   const [graphLoading, setGraphLoading] = useState(false);
+  const [remoteChanged, setRemoteChanged] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [original, setOriginal] = useState(false);
   const [graphOnly, setGraphOnly] = useState(false);
@@ -28,6 +31,18 @@ export default function App() {
   const [checksOpen, setChecksOpen] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const method = project?.methods.find(item => item.id === methodId) ?? null;
+  const projectRef = useRef(project); projectRef.current = project;
+  const methodRef = useRef(methodId); methodRef.current = methodId;
+  function adoptProject(next: Project) {
+    const previous = projectRef.current;
+    if (!previous || next.id !== previous.id || next.revision < previous.revision) return;
+    const selected = previous.methods.find(item => item.id === methodRef.current);
+    const nextMethod = next.methods.find(item => sameMethod(item, selected));
+    setMethodId(nextMethod?.id ?? next.methods.find(item => item.hasBody)?.id ?? next.methods[0]?.id ?? null);
+    projectRef.current = next; setRemoteChanged(false); setProject(next);
+  }
+  const editor = useWorkingCopy(project, adoptProject);
+  const graphStale = !!project && (remoteChanged || editor.dirty || project.revision !== project.graphRevision);
 
   function openProject(next: Project) {
     setProject(next);
@@ -36,6 +51,7 @@ export default function App() {
       ?? next.methods.find(item => item.hasBody)?.id ?? next.methods[0]?.id ?? null);
     setSelection(null);
     setOriginal(false);
+    setRemoteChanged(false);
   }
 
   useEffect(() => {
@@ -52,11 +68,28 @@ export default function App() {
     setGraph(null);
     setSelection(null);
     sessionStorage.setItem(`method:${project.id}`, methodId);
-    api.graph(project.id, methodId).then(next => { if (active) setGraph(next); })
-      .catch(reason => { if (active) setError(String(reason.message)); })
+    api.graph(project.id, methodId).then(next => {
+      const current = projectRef.current;
+      if (!active || current?.id !== project.id) return;
+      if (next.projectRevision >= current.revision) {
+        setRemoteChanged(next.projectRevision !== current.revision || next.sourceRevision !== current.graphRevision);
+      }
+      if (next.sourceRevision === current.graphRevision) setGraph(next);
+    })
+      .catch(async reason => {
+        if (!active) return;
+        if (reason instanceof ApiError && reason.status === 404) {
+          try {
+            const remote = await api.project(project.id);
+            if (!active) return;
+            if (remote.revision !== projectRef.current?.revision) { setRemoteChanged(true); return; }
+          } catch { /* The original request error describes an expired or unavailable project. */ }
+        }
+        if (active) setError(String(reason.message));
+      })
       .finally(() => { if (active) setGraphLoading(false); });
     return () => { active = false; };
-  }, [project, methodId]);
+  }, [project?.id, project?.graphRevision, methodId]);
 
   async function importSource(filename: string, source: string) {
     setBusy(true); setError(null);
@@ -74,9 +107,11 @@ export default function App() {
   function exportSource() {
     if (!project) return;
     const anchor = document.createElement('a');
-    anchor.href = `/api/projects/${encodeURIComponent(project.id)}/export`;
+    const url = URL.createObjectURL(new Blob([editor.source], { type: 'text/plain;charset=utf-8' }));
+    anchor.href = url;
     anchor.download = project.filename;
     anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   const groups = new Map<string, JavaMethod[]>();
@@ -142,16 +177,27 @@ export default function App() {
             </div> : <>
               <div className="project-heading"><div><div className="eyebrow">ВАША ПРОГРАММА, НАГЛЯДНО</div><h1>{project.filename}</h1>
                 <p>Выберите метод и проследите, как выполняется код.</p></div>
-                <div className="view-options"><span className="model-status"><Check size={13} />Модель построена</span>
+                <div className="view-options"><span className={`model-status ${graphStale ? 'stale' : ''}`}><Check size={13} />{graphStale ? 'Граф устарел' : 'Модель построена'}</span>
                   <button className={`view-toggle ${graphOnly ? 'active' : ''}`} aria-label={graphOnly ? 'Показать код и граф' : 'Развернуть граф'} onClick={() => setGraphOnly(!graphOnly)}><PanelLeftClose size={16} /></button></div></div>
+              <div className="editing-toolbar"><div role="status"><span>{editor.saving ? 'Сохраняем код и строим граф…' : editor.dirty ? editor.localSaved ? 'Черновик сохранён в браузере' : 'Черновик пока не сохранён' : `Код сохранён · ревизия ${project.revision}`}</span>
+                <small>Граф: ревизия {project.graphRevision}</small></div>
+                <button className="button primary" disabled={editor.saving || !!editor.conflict} onClick={() => void editor.rebuild()}>
+                  {editor.saving ? <LoaderCircle size={14} className="spin" /> : <GitBranch size={14} />}Обновить граф</button></div>
+              {editor.error && <div className="edit-error" role="alert">{editor.error}</div>}
+              {remoteChanged && <div className="edit-error remote-change" role="alert">Проект обновлён в другой вкладке. Обновите страницу или сохраните свой текст через «Обновить граф».</div>}
+              {editor.conflict && <div className="edit-conflict" role="alert"><p>Проект изменён в другой вкладке. Ваш текст сохранён локально. Выберите, какую версию использовать.</p>
+                <button className="button secondary" onClick={editor.useServerCopy}>Загрузить серверную версию</button>
+                <button className="button secondary" disabled={editor.saving} onClick={() => void editor.rebuild(editor.conflict!)}>Сохранить мой текст поверх серверного</button></div>}
+              {!editor.dirty && project.diagnostics.length > 0 && <div className="edit-diagnostics" role="alert"><strong>Java содержит синтаксические ошибки. Код сохранён, показан предыдущий граф.</strong>
+                {project.diagnostics.map((item, index) => <div key={index}>Строка {item.line}, столбец {item.column}: {item.message}</div>)}</div>}
               <div className={`editor-workspace ${graphOnly ? 'graph-only' : ''}`}>
-                {!graphOnly && <SourceView project={project} method={method} selection={selection?.range ?? null} blocks={graph?.nodes ?? []}
-                  onSelect={setSelection} original={original} onOriginal={setOriginal} />}
-                <MethodGraph graph={graph} method={method} selected={selection?.id ?? null} onSelect={setSelection} loading={graphLoading} />
+                {!graphOnly && <SourceView key={project.id} project={project} method={method} selection={selection?.range ?? null} blocks={graphStale ? [] : graph?.nodes ?? []}
+                  onSelect={setSelection} original={original} onOriginal={setOriginal} value={editor.source} onChange={editor.changeSource} stale={graphStale} dirty={editor.dirty} />}
+                <MethodGraph graph={graph} method={method} selected={selection?.id ?? null} onSelect={setSelection} loading={graphLoading} stale={graphStale} />
               </div>
               <div className="workspace-note"><span><i />{project.methods.length} методов · ревизия {project.revision}</span>
                 <span>Исходная версия сохранена <Check size={12} /></span></div>
-              <CheckPanel project={project} open={checksOpen} onToggle={() => setChecksOpen(!checksOpen)} />
+              <CheckPanel project={project} open={checksOpen} onToggle={() => setChecksOpen(!checksOpen)} pendingChanges={remoteChanged || editor.dirty || editor.saving} />
             </>}
           <footer className="app-footer"><span><GitBranch size={13} />Java ↔ граф</span><span>Исследуйте код. Сохраняйте смысл.</span><span>AXENIX HACKATHON <i>2026</i></span></footer>
         </main>
