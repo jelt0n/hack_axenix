@@ -31,9 +31,11 @@ public final class BlueprintParser {
         try {
             JsonObject request = JsonParser.parseString(
                 new String(System.in.readAllBytes(), StandardCharsets.UTF_8)).getAsJsonObject();
+            String source = request.get("source").getAsString();
             JsonObject edit = request.has("edit") && !request.get("edit").isJsonNull()
                 ? request.getAsJsonObject("edit") : null;
-            System.out.println(JSON.toJson(parse(request.get("source").getAsString(), edit)));
+            boolean analyze = request.has("analyze") && request.get("analyze").getAsBoolean();
+            System.out.println(JSON.toJson(parse(source, edit, analyze)));
         } catch (EditRejected error) {
             System.out.println(JSON.toJson(Map.of("ok", false, "errors", List.of(
                 Map.of("message", error.getMessage(), "line", 1, "column", 1)))));
@@ -49,7 +51,7 @@ public final class BlueprintParser {
         EditRejected(String message) { super(message); }
     }
 
-    private static Map<String, Object> parse(String source, JsonObject edit) {
+    private static Map<String, Object> parse(String source, JsonObject edit, boolean analyze) {
         JavaParser parser = new JavaParser(new ParserConfiguration().setTabSize(1)
             .setLanguageLevel(ParserConfiguration.LanguageLevel.BLEEDING_EDGE));
         ParseResult<CompilationUnit> result = parser.parse(source);
@@ -73,8 +75,7 @@ public final class BlueprintParser {
                 continue;
             }
             CallableDeclaration<?> callable = (CallableDeclaration<?>) node;
-            Range range = node.getRange().orElseThrow();
-            String id = "method-" + range.begin.line + "-" + range.begin.column;
+            String id = methodId(node);
             List<String> owners = new ArrayList<>();
             for (Node parent = node.getParentNode().orElse(null); parent != null;
                     parent = parent.getParentNode().orElse(null)) {
@@ -99,14 +100,21 @@ public final class BlueprintParser {
         if (edit != null) {
             if (selectedGraph == null) throw new EditRejected("Метод не найден. Обновите граф.");
             selectedGraph.edit(edit, parser);
-            return parse(LexicalPreservingPrinter.print(unit), null);
+            return parse(LexicalPreservingPrinter.print(unit), null, analyze);
         }
-        return Map.of("ok", true, "methods", methods, "graphs", graphs,
+        Map<String, Object> parsed = new LinkedHashMap<>(Map.of("ok", true, "methods", methods, "graphs", graphs,
             "generatedSource", LexicalPreservingPrinter.print(unit),
-            "packageName", unit.getPackageDeclaration().map(p -> p.getNameAsString()).orElse(""));
+            "packageName", unit.getPackageDeclaration().map(p -> p.getNameAsString()).orElse("")));
+        if (analyze) parsed.put("analysis", BlueprintAnalyzer.analyze(unit, parsed));
+        return parsed;
     }
 
-    private static Map<String, Integer> location(Node node) {
+    static String methodId(Node node) {
+        var start = node.getBegin().orElseThrow();
+        return "method-" + start.line + "-" + start.column;
+    }
+
+    static Map<String, Integer> location(Node node) {
         Range r = node.getRange().orElseThrow();
         return Map.of("startLine", r.begin.line, "startColumn", r.begin.column,
             "endLine", r.end.line, "endColumn", r.end.column);

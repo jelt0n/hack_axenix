@@ -54,3 +54,14 @@ export type CheckJob = {
     error?: { kind: string; message: string };
   } | null;
 };
+
+export type AnalysisFinding = {
+  rule: string; message: string; recommendation: string; methodId: string;
+  nodeId: string; range: SourceRange;
+};
+export type AnalysisReport = {
+  projectId: string; sourceRevision: number; findings: AnalysisFinding[];
+  thresholds: { longMethodLines: number; deepNesting: number };
+  methods: { methodId: string; signature: string; range: SourceRange;
+    complexity: { label: string; explanation: string; assumptions: string[] } }[];
+};

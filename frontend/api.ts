@@ -1,4 +1,4 @@
-import type { CheckJob, GraphEdit, MethodGraph, Project, Scenario } from './types';
+import type { AnalysisReport, CheckJob, GraphEdit, MethodGraph, Project, Scenario } from './types';
 
 type FailureDetail = string | { message?: string; errors?: { message: string; line: number }[] }
   | { msg: string }[];
@@ -21,6 +21,11 @@ export class ApiError extends Error {
 }
 
 export const api = {
+  analyze: (id: string, revision: number) => request<AnalysisReport>(
+    `/api/projects/${encodeURIComponent(id)}/analysis`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revision }),
+    },
+  ),
   current: () => request<Project>('/api/projects/current'),
   project: (id: string) => request<Project>(`/api/projects/${encodeURIComponent(id)}`),
   saveSource: (id: string, revision: number, source: string) => request<Project>(
