@@ -6,6 +6,24 @@ from contextlib import contextmanager
 from pathlib import Path
 
 
+class RevisionConflict(Exception):
+    pass
+
+
+class ProjectNotFound(Exception):
+    pass
+
+
+def editor_state(project: dict) -> dict:
+    """Load older imported projects without changing their sources or model."""
+    project.setdefault("graphRevision", project["revision"])
+    project.setdefault("modelSource", project["generatedSource"])
+    project.setdefault("originalMethods", project["methods"])
+    project.setdefault("originalPackageName", project["packageName"])
+    project.setdefault("diagnostics", [])
+    return project
+
+
 class ProjectStore:
     """Only opaque browser capabilities can read projects; IDs are not credentials."""
 
@@ -38,6 +56,11 @@ class ProjectStore:
             "packageName": parsed["packageName"],
             "methods": parsed["methods"],
             "graphs": parsed["graphs"],
+            "graphRevision": 1,
+            "modelSource": parsed["generatedSource"],
+            "originalMethods": parsed["methods"],
+            "originalPackageName": parsed["packageName"],
+            "diagnostics": [],
         }
         with self.connect() as db:
             db.execute("DELETE FROM projects WHERE created < ?", (time.time() - 24 * 3600,))
@@ -60,7 +83,49 @@ class ProjectStore:
                     "SELECT payload FROM projects WHERE id = ? AND session = ? AND created > ?",
                     (project_id, session, time.time() - 24 * 3600),
                 ).fetchone()
-        return json.loads(row[0]) if row else None
+        return editor_state(json.loads(row[0])) if row else None
+
+    def _update(self, session: str, project_id: str, revision: int, change) -> dict:
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT payload FROM projects WHERE id=? AND session=? AND created>?",
+                (project_id, session, time.time() - 86400),
+            ).fetchone()
+            if row is None:
+                raise ProjectNotFound
+            project = editor_state(json.loads(row[0]))
+            if project["revision"] != revision:
+                raise RevisionConflict
+            change(project)
+            db.execute(
+                "UPDATE projects SET payload=? WHERE id=?",
+                (json.dumps(project, ensure_ascii=False), project_id),
+            )
+        return project
+
+    def save_source(self, session: str, project_id: str, revision: int, source: str) -> dict:
+        def change(project):
+            if project["generatedSource"] != source:
+                project["generatedSource"] = source
+                project["revision"] += 1
+                project["diagnostics"] = []
+
+        return self._update(session, project_id, revision, change)
+
+    def rebuild(self, session: str, project_id: str, revision: int, parsed: dict) -> dict:
+        def change(project):
+            project["diagnostics"] = parsed.get("errors", [])
+            if parsed["ok"]:
+                project.update(
+                    packageName=parsed["packageName"],
+                    methods=parsed["methods"],
+                    graphs=parsed["graphs"],
+                    graphRevision=project["revision"],
+                    modelSource=project["generatedSource"],
+                )
+
+        return self._update(session, project_id, revision, change)
 
 
 def summary(project: dict) -> dict:

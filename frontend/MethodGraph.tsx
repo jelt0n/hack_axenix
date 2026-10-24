@@ -96,9 +96,9 @@ function GraphCanvas({ graph, selected, onSelect }: {
   );
 }
 
-export default function MethodGraph({ graph, method, selected, onSelect, loading }: {
+export default function MethodGraph({ graph, method, selected, onSelect, loading, stale = false }: {
   graph: Graph | null; method: JavaMethod | null; selected: string | null;
-  onSelect: (block: GraphNode) => void; loading: boolean;
+  onSelect: (block: GraphNode) => void; loading: boolean; stale?: boolean;
 }) {
   return (
     <section className="graph-panel" aria-label="Граф метода">
@@ -108,13 +108,14 @@ export default function MethodGraph({ graph, method, selected, onSelect, loading
       </div>
       <div className="graph-caption"><span>{method?.signature || 'Выберите метод'}</span>
         <span>{method?.owner || 'JAVA'}</span></div>
+      {stale && <div className="graph-stale" role="status">Граф устарел. Обновите его по рабочему коду; переходы к строкам временно отключены.</div>}
       {loading ? <div className="panel-empty"><span className="spinner" />Строим граф…</div>
         : graph && graph.nodes.length > 0 ? <ReactFlowProvider key={graph.methodId}>
-          <GraphCanvas graph={graph} selected={selected} onSelect={onSelect} />
+          <GraphCanvas graph={graph} selected={stale ? null : selected} onSelect={stale ? () => {} : onSelect} />
         </ReactFlowProvider>
         : <div className="panel-empty"><ArrowDownToLine size={28} />
-          <strong>{method ? 'У объявления нет тела' : 'Здесь появится структура метода'}</strong>
-          <span>{method ? 'Интерфейсы и абстрактные методы сохраняются в исходнике.' : 'Загрузите Java-файл или откройте пример.'}</span>
+          <strong>{stale ? 'Модель проекта изменилась' : method ? method.hasBody ? 'Граф недоступен' : 'У объявления нет тела' : 'Здесь появится структура метода'}</strong>
+          <span>{stale ? 'Загрузите актуальную версию или разрешите конфликт сохранения.' : method ? 'Интерфейсы и абстрактные методы сохраняются в исходнике.' : 'Загрузите Java-файл или откройте пример.'}</span>
         </div>}
       {graph && graph.notices.length > 0 && <div className="graph-notice" role="note">{graph.notices[0]}</div>}
       <div className="graph-legend"><span><i className="legend-operation" />Операция</span>
