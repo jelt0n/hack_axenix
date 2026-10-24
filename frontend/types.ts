@@ -17,15 +17,25 @@ export type Project = {
 export type Diagnostic = { message: string; line: number; column: number };
 
 export type GraphNode = {
-  id: string; kind: 'entry' | 'exit' | 'operation' | 'condition' | 'return' | 'opaque';
+  id: string; kind: 'entry' | 'exit' | 'operation' | 'condition' | 'return' | 'opaque' | 'jump' | 'control' | 'dispatch' | 'exception' | 'completion';
   code: string; range: SourceRange;
+  constantBranch?: boolean; editable?: boolean; containerId?: string; index?: number;
 };
+
+export type GraphContainer = { id: string; kind: string; label: string; size: number };
+export type GraphAction =
+  | { action: 'replace'; nodeId: string; code: string }
+  | { action: 'insert'; containerId: string; index: number; code: string }
+  | { action: 'delete'; nodeId: string }
+  | { action: 'move'; nodeId: string; containerId: string; index: number };
+export type GraphEdit = GraphAction & { methodId: string };
 
 export type MethodGraph = {
   methodId: string; nodes: GraphNode[];
   sourceRevision: number; projectRevision: number; stale: boolean;
-  edges: { id: string; source: string; target: string; label: string }[];
+  edges: { id: string; source: string; target: string; label: string; backEdge?: boolean }[];
   notices: string[];
+  containers?: GraphContainer[];
 };
 
 export type Scenario = { name: string; stdin: string };
@@ -43,4 +53,26 @@ export type CheckJob = {
       working: ProgramResult | null; matches: boolean }[];
     error?: { kind: string; message: string };
   } | null;
+};
+
+export type AnalysisFinding = {
+  rule: string; message: string; recommendation: string; methodId: string;
+  nodeId: string; range: SourceRange;
+};
+export type AnalysisReport = {
+  projectId: string; sourceRevision: number; findings: AnalysisFinding[];
+  thresholds: { longMethodLines: number; deepNesting: number };
+  methods: { methodId: string; signature: string; range: SourceRange;
+    complexity: { label: string; explanation: string; assumptions: string[] } }[];
+};
+
+export type BranchPreview = {
+  projectId: string; sourceRevision: number; methodId: string; nodeId: string;
+  previewHash: string; before: string; after: string; range: SourceRange;
+};
+export type AutomaticCheck = { projectId: string; revision: number; sequence: number };
+
+export type ExtractionSelection = { methodId: string; startIndex: number; endIndex: number; methodName: string };
+export type ExtractionPreview = Omit<BranchPreview, 'nodeId'> & ExtractionSelection & {
+  newMethod: string; parameters: { name: string; type: string }[]; returnType: string; outputName: string;
 };

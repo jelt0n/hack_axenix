@@ -9,9 +9,12 @@ import { exampleSource } from './example';
 import MethodGraph from './MethodGraph';
 import SourceView from './SourceView';
 import CheckPanel from './CheckPanel';
+import AnalysisPanel from './AnalysisPanel';
+import ConstantBranchPanel from './ConstantBranchPanel';
+import ExtractMethodPanel from './ExtractMethodPanel';
 import useWorkingCopy from './useWorkingCopy';
 import { sameMethod } from './methods';
-import type { GraphNode, JavaMethod, MethodGraph as Graph, Project } from './types';
+import type { ExtractionPreview, AutomaticCheck, BranchPreview, AnalysisFinding, GraphNode, JavaMethod, MethodGraph as Graph, Project } from './types';
 import '@xyflow/react/dist/style.css';
 import './style.css';
 
@@ -29,7 +32,10 @@ export default function App() {
   const [graphOnly, setGraphOnly] = useState(false);
   const [help, setHelp] = useState(false);
   const [checksOpen, setChecksOpen] = useState(false);
+  const [automaticCheck, setAutomaticCheck] = useState<AutomaticCheck | null>(null);
+  const checkSequence = useRef(0);
   const input = useRef<HTMLInputElement>(null);
+  const analysisTarget = useRef<AnalysisFinding | null>(null);
   const method = project?.methods.find(item => item.id === methodId) ?? null;
   const projectRef = useRef(project); projectRef.current = project;
   const methodRef = useRef(methodId); methodRef.current = methodId;
@@ -39,12 +45,15 @@ export default function App() {
     const selected = previous.methods.find(item => item.id === methodRef.current);
     const nextMethod = next.methods.find(item => sameMethod(item, selected));
     setMethodId(nextMethod?.id ?? next.methods.find(item => item.hasBody)?.id ?? next.methods[0]?.id ?? null);
+    analysisTarget.current = null;
     projectRef.current = next; setRemoteChanged(false); setProject(next);
   }
   const editor = useWorkingCopy(project, adoptProject);
-  const graphStale = !!project && (remoteChanged || editor.dirty || project.revision !== project.graphRevision);
+  const graphStale = !!project && (remoteChanged || !!editor.conflict || editor.dirty || project.revision !== project.graphRevision);
 
   function openProject(next: Project) {
+    analysisTarget.current = null;
+    setAutomaticCheck(null);
     setProject(next);
     const remembered = sessionStorage.getItem(`method:${next.id}`);
     setMethodId(next.methods.find(item => item.id === remembered)?.id
@@ -74,7 +83,15 @@ export default function App() {
       if (next.projectRevision >= current.revision) {
         setRemoteChanged(next.projectRevision !== current.revision || next.sourceRevision !== current.graphRevision);
       }
-      if (next.sourceRevision === current.graphRevision) setGraph(next);
+      if (next.sourceRevision === current.graphRevision) {
+        setGraph(next);
+        const target = analysisTarget.current;
+        if (target?.methodId === next.methodId && !next.stale) {
+          const block = next.nodes.find(node => node.id === target.nodeId);
+          setSelection(block ? { ...block, range: target.range } : { id: '', kind: 'operation', code: '', range: target.range });
+          analysisTarget.current = null;
+        }
+      }
     })
       .catch(async reason => {
         if (!active) return;
@@ -102,6 +119,25 @@ export default function App() {
     if (!file.name.endsWith('.java')) { setError('Выберите файл с расширением .java'); return; }
     if (file.size > 256_000) { setError('Выберите Java-файл размером до 256 КБ'); return; }
     await importSource(file.name, await file.text());
+  }
+
+  function navigateFinding(finding: AnalysisFinding) {
+    if (graphStale) return;
+    setOriginal(false); setGraphOnly(false);
+    if (methodId === finding.methodId && graph) {
+      const block = graph.nodes.find(node => node.id === finding.nodeId);
+      setSelection(block ? { ...block, range: finding.range } : { id: '', kind: 'operation', code: '', range: finding.range });
+    } else {
+      analysisTarget.current = finding;
+      setMethodId(finding.methodId);
+    }
+  }
+
+  async function applyTransformation(preview: BranchPreview | ExtractionPreview) {
+    const changed = await editor.applyTransformation(preview);
+    if (!changed) return;
+    setChecksOpen(true);
+    setAutomaticCheck({ projectId: changed.id, revision: changed.revision, sequence: ++checkSequence.current });
   }
 
   function exportSource() {
@@ -139,7 +175,7 @@ export default function App() {
             <nav className="methods" aria-label="Методы программы">{[...groups].map(([owner, methods]) => <div key={owner}>
               <div className="class-label"><Box size={12} />{owner || 'Без класса'}</div>
               {methods.map(item => <button key={item.id} className={`method-button ${item.id === methodId ? 'active' : ''}`}
-                aria-pressed={item.id === methodId} onClick={() => setMethodId(item.id)} title={item.signature}>
+                aria-pressed={item.id === methodId} onClick={() => { analysisTarget.current = null; setMethodId(item.id); }} title={item.signature}>
                 <span className={`method-icon ${item.kind === 'constructor' ? 'constructor' : ''}`}>{item.kind === 'constructor' ? 'C' : 'ƒ'}</span>
                 <span>{item.signature}</span>{item.id === methodId && <ChevronRight size={13} />}
               </button>)}
@@ -193,11 +229,20 @@ export default function App() {
               <div className={`editor-workspace ${graphOnly ? 'graph-only' : ''}`}>
                 {!graphOnly && <SourceView key={project.id} project={project} method={method} selection={selection?.range ?? null} blocks={graphStale ? [] : graph?.nodes ?? []}
                   onSelect={setSelection} original={original} onOriginal={setOriginal} value={editor.source} onChange={editor.changeSource} stale={graphStale} dirty={editor.dirty} />}
-                <MethodGraph graph={graph} method={method} selected={selection?.id ?? null} onSelect={setSelection} loading={graphLoading} stale={graphStale} />
+                <MethodGraph graph={graph} method={method} selected={selection?.id ?? null} onSelect={setSelection} loading={graphLoading} stale={graphStale}
+                  editDisabled={editor.saving || !!editor.conflict || original} onEdit={editor.editGraph} />
               </div>
               <div className="workspace-note"><span><i />{project.methods.length} методов · ревизия {project.revision}</span>
                 <span>Исходная версия сохранена <Check size={12} /></span></div>
-              <CheckPanel project={project} open={checksOpen} onToggle={() => setChecksOpen(!checksOpen)} pendingChanges={remoteChanged || editor.dirty || editor.saving} />
+              <ConstantBranchPanel key={`constant:${project.id}`} project={project} graph={graph} selected={selection}
+                disabled={graphStale || editor.saving || original || graphLoading}
+                onApply={applyTransformation} onConflict={() => setRemoteChanged(true)} />
+              <ExtractMethodPanel key={`extract:${project.id}`} project={project} graph={graph} selected={selection}
+                disabled={graphStale || editor.saving || original || graphLoading}
+                onApply={applyTransformation} onConflict={() => setRemoteChanged(true)} />
+              <AnalysisPanel key={`analysis:${project.id}`} project={project} pendingChanges={graphStale || editor.saving}
+                onNavigate={navigateFinding} onConflict={() => setRemoteChanged(true)} />
+              <CheckPanel project={project} open={checksOpen} onToggle={() => setChecksOpen(!checksOpen)} pendingChanges={remoteChanged || !!editor.conflict || editor.dirty || editor.saving} automaticCheck={automaticCheck} />
             </>}
           <footer className="app-footer"><span><GitBranch size={13} />Java ↔ граф</span><span>Исследуйте код. Сохраняйте смысл.</span><span>AXENIX HACKATHON <i>2026</i></span></footer>
         </main>
@@ -206,8 +251,8 @@ export default function App() {
         <button className="icon-button modal-close" aria-label="Закрыть справку" onClick={() => setHelp(false)}><X size={20} /></button>
         <div className="eyebrow">JAVA BLUEPRINTS</div><h2>От исходника к структуре</h2>
         <ol><li><strong>Загрузите .java</strong><p>Исходная версия сохраняется отдельно от сгенерированного кода.</p></li>
-          <li><strong>Выберите метод</strong><p>Граф показывает последовательности и if/else. Остальные конструкции пока отображаются целыми блоками с пояснением.</p></li>
-          <li><strong>Исследуйте и скачайте</strong><p>Нажмите на блок, чтобы найти строку кода. Экспорт сохраняет комментарии и оформление.</p></li></ol>
+          <li><strong>Выберите метод</strong><p>Граф показывает ветвления, циклы, поддержанные switch и переходы управления. Пунктир обозначает повтор цикла. Неподдержанные формы показаны целиком с пояснением.</p></li>
+          <li><strong>Изменяйте и проверяйте</strong><p>Выберите блок для правки, добавьте или переместите операцию в последовательности. Затем запустите проверку поведения. Экспорт сохраняет комментарии и оформление.</p></li></ol>
         <div className="help-note">В разделе «Проверка поведения» обе версии выполняются на одинаковых входах в отдельном исполнителе. Результат относится только к выбранным сценариям. Проекты временные и хранятся до 24 часов.</div>
         <button className="button primary" onClick={() => setHelp(false)}>Понятно <ArrowRight size={15} /></button>
       </section></div>}
