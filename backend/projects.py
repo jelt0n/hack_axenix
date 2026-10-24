@@ -80,11 +80,11 @@ class ProjectStore:
                 )
             db.execute(
                 "INSERT INTO projects VALUES (?, ?, ?, ?)",
-                (project["id"], session, time.time(), self._payload(db, project)),
+                (project["id"], session, time.time(), self._payload_within_capacity(db, project)),
             )
         return project
 
-    def _payload(self, db: sqlite3.Connection, project: dict) -> str:
+    def _payload_within_capacity(self, db: sqlite3.Connection, project: dict) -> str:
         payload = json.dumps(project, ensure_ascii=False)
         occupied = db.execute(
             "SELECT COALESCE(SUM(length(CAST(payload AS BLOB))), 0) FROM projects WHERE id != ?",
@@ -92,7 +92,8 @@ class ProjectStore:
         ).fetchone()[0]
         if occupied + len(payload.encode("utf-8")) > self.byte_limit:
             raise ProjectCapacityExceeded(
-                "Хранилище временных проектов заполнено. Изменение не сохранено; уменьшите исходник или повторите позже."
+                "Хранилище временных проектов заполнено. Изменение не сохранено; "
+                "уменьшите исходник или повторите позже."
             )
         return payload
 
@@ -127,7 +128,7 @@ class ProjectStore:
             db.execute("DELETE FROM projects WHERE created < ?", (time.time() - 86400,))
             db.execute(
                 "UPDATE projects SET payload=? WHERE id=?",
-                (self._payload(db, project), project_id),
+                (self._payload_within_capacity(db, project), project_id),
             )
         return project
 
