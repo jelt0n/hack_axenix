@@ -566,7 +566,7 @@ a {
   display:grid;
   grid-template-columns:minmax(300px,.83fr) minmax(390px,1.17fr);
   flex:1;
-  min-height:390px;
+  min-height:650px;
   margin:0 29px;
   border:1px solid #dce3eb;
   border-radius:9px;
@@ -779,6 +779,17 @@ a {
   min-width:0;
   background:#f8fafc;
 }
+
+.graph-edit-tools { padding:12px 15px; border-top:1px solid #dce3eb; background:#fff; min-height:110px; max-height:330px; overflow:auto; flex-shrink:1; }
+.graph-edit-heading,.graph-edit-actions { display:flex; align-items:center; flex-wrap:wrap; gap:7px; }
+.graph-edit-heading { justify-content:space-between; font-size:11px; margin-bottom:8px; }
+.graph-edit-tools fieldset { border:0; padding:0; margin:0; min-width:0; }
+.graph-edit-tools label { display:block; font-size:10px; color:#52627a; margin:7px 0; }
+.graph-edit-tools textarea,.graph-edit-tools select { display:block; width:100%; margin-top:5px; padding:7px; border:1px solid #cbd5e1; border-radius:5px; background:#f8fafc; color:#22334b; }
+.graph-edit-tools textarea { font-family:monospace; font-size:12px; resize:vertical; min-height:55px; max-height:160px; }
+.graph-edit-tools .button { font-size:10px; padding:7px 9px; }
+.graph-edit-note { color:#64748b; font-size:10px; line-height:1.5; margin:6px 0; }
+.graph-add-form { margin-top:10px; border-top:1px solid #e2e8f0; padding-top:5px; }
 
 .small-tag {
   color:#a1adbd;

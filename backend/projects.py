@@ -127,6 +127,24 @@ class ProjectStore:
 
         return self._update(session, project_id, revision, change)
 
+    def apply_graph_edit(self, session: str, project_id: str, revision: int, parsed: dict) -> dict:
+        def change(project):
+            if project["graphRevision"] != revision:
+                raise RevisionConflict
+            if project["generatedSource"] != parsed["generatedSource"]:
+                project["revision"] += 1
+            project.update(
+                generatedSource=parsed["generatedSource"],
+                modelSource=parsed["generatedSource"],
+                methods=parsed["methods"],
+                graphs=parsed["graphs"],
+                packageName=parsed["packageName"],
+                graphRevision=project["revision"],
+                diagnostics=[],
+            )
+
+        return self._update(session, project_id, revision, change)
+
 
 def summary(project: dict) -> dict:
     return {key: value for key, value in project.items() if key != "graphs"}
