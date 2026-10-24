@@ -1692,3 +1692,14 @@ a {
   .analysis-results { grid-template-columns:1fr; }
   .analysis-panel { margin-left:14px; margin-right:14px; }
 }
+.constant-branch-panel { margin:0 29px 16px; padding:18px; background:#fff; border:1px solid #dce3eb; border-radius:9px; }
+.constant-branch-panel p { color:#657387; line-height:1.6; margin:8px 0; }
+.branch-preview { border-top:1px solid #dce3eb; margin-top:14px; padding-top:12px; }
+.branch-preview-code { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:16px; }
+.branch-preview-code h3 { font-size:12px; }
+.branch-preview-code pre { padding:12px; margin:0; background:#16202f; color:#d6e0ef; border-radius:6px; white-space:pre-wrap; overflow-wrap:anywhere; max-height:230px; overflow:auto; }
+@media(max-width:900px) {
+  .constant-branch-panel { margin-left:14px; margin-right:14px; }
+  .constant-branch-panel .analysis-heading { align-items:flex-start; flex-wrap:wrap; }
+  .branch-preview-code { grid-template-columns:1fr; }
+}

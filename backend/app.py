@@ -1,3 +1,4 @@
+import hashlib
 import os
 import secrets
 from pathlib import Path
@@ -46,6 +47,15 @@ class SourceRequest(RevisionRequest):
         if len(value.encode("utf-8")) > 256_000:
             raise ValueError("Исходник превышает 256 КБ UTF-8")
         return value
+
+
+class BranchSelection(RevisionRequest):
+    methodId: str = Field(min_length=1, max_length=120)
+    nodeId: str = Field(min_length=1, max_length=160)
+
+
+class BranchConfirmation(BranchSelection):
+    previewHash: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
 class GraphEditRequest(RevisionRequest):
@@ -219,6 +229,55 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             "projectRevision": project["revision"],
             "stale": project["graphRevision"] != project["revision"],
         }
+
+    def constant_candidate(project_id: str, payload: BranchSelection, request: Request):
+        project = owned(request, project_id)
+        if project["revision"] != payload.revision or project["graphRevision"] != payload.revision:
+            raise HTTPException(409, "Граф изменился. Обновите его и повторите предпросмотр.")
+        try:
+            parsed = parse_java(
+                project["generatedSource"],
+                edit={
+                    "action": "simplify-constant",
+                    "methodId": payload.methodId,
+                    "nodeId": payload.nodeId,
+                },
+            )
+        except ParserUnavailable as exc:
+            raise HTTPException(503, str(exc)) from exc
+        if not parsed["ok"]:
+            raise HTTPException(422, {"message": "Упрощение отклонено", "errors": parsed["errors"]})
+        if len(parsed["generatedSource"].encode("utf-8")) > 256_000:
+            raise HTTPException(422, "После преобразования исходник превышает 256 КБ UTF-8")
+        if owned(request, project_id)["revision"] != payload.revision:
+            raise RevisionConflict
+        digest = hashlib.sha256(parsed["generatedSource"].encode("utf-8")).hexdigest()
+        return parsed, digest
+
+    @app.post("/api/projects/{project_id}/transformations/constant-branch/preview")
+    def preview_branch(project_id: str, payload: BranchSelection, request: Request):
+        parsed, digest = constant_candidate(project_id, payload, request)
+        return {
+            "projectId": project_id,
+            "sourceRevision": payload.revision,
+            "methodId": payload.methodId,
+            "nodeId": payload.nodeId,
+            "previewHash": digest,
+            **parsed["transformation"],
+        }
+
+    @app.post("/api/projects/{project_id}/transformations/constant-branch/apply")
+    def apply_branch(project_id: str, payload: BranchConfirmation, request: Request):
+        parsed, digest = constant_candidate(project_id, payload, request)
+        if digest != payload.previewHash:
+            raise HTTPException(
+                409, "Предпросмотр не совпадает с преобразованием. Откройте его снова."
+            )
+        return summary(
+            store.apply_graph_edit(
+                request.cookies.get(COOKIE, ""), project_id, payload.revision, parsed
+            )
+        )
 
     @app.post("/api/projects/{project_id}/graph-edits")
     def edit_graph(project_id: str, payload: GraphEditRequest, request: Request):
