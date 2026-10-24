@@ -1,4 +1,4 @@
-import type { MethodGraph, Project } from './types';
+import type { CheckJob, MethodGraph, Project, Scenario } from './types';
 
 type FailureDetail = string | { message?: string; errors?: { message: string; line: number }[] }
   | { msg: string }[];
@@ -24,4 +24,13 @@ export const api = {
   graph: (projectId: string, methodId: string) => request<MethodGraph>(
     `/api/projects/${encodeURIComponent(projectId)}/methods/${encodeURIComponent(methodId)}/graph`,
   ),
+  createCheck: (project: Project, scenarios: Scenario[], mainClass: string) => request<CheckJob>(
+    `/api/projects/${encodeURIComponent(project.id)}/checks`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ revision: project.revision, scenarios, mainClass }),
+    },
+  ),
+  check: (id: string) => request<CheckJob>(`/api/checks/${encodeURIComponent(id)}`),
+  latestCheck: (projectId: string) => request<CheckJob>(`/api/projects/${encodeURIComponent(projectId)}/checks/latest`),
+  runner: () => request<{ available: boolean }>('/api/runner'),
 };
