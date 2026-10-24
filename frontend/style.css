@@ -664,9 +664,12 @@ a {
 
 .source-path>span:last-child {
   font-family:Manrope,sans-serif;
-  font-size:7px;
-  letter-spacing:1px;
+  font-size:9px;
   color:#b99462;
+  max-width:55%;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
 }
 
 .source-scroll {

@@ -1,5 +1,32 @@
 import { expect, test } from '@playwright/test';
 
+for (const gap of [0, 80]) {
+  test(`выбор метода в списке переводит код к выбранному методу и выделяет его (разрыв ${gap})`, async ({ page }) => {
+    const lines = ['class MethodNavigation {', '  int first() {', '    return 1;', '  }',
+      ...Array.from({ length: gap }, (_, i) => `  // Разделитель ${i}`),
+      '  int second() {', '    return 2;', '  }', '}'];
+    const secondLine = lines.findIndex(line => line.includes('int second()')) + 1;
+    await page.goto('/');
+    await page.getByLabel('Загрузить Java-файл').setInputFiles({
+      name: 'MethodNavigation.java', mimeType: 'text/x-java-source', buffer: Buffer.from(lines.join('\n')),
+    });
+    await expect(page.getByRole('heading', { name: 'MethodNavigation.java' })).toBeVisible();
+    await page.getByRole('button', { name: /second\(\)/ }).click();
+    await expect(page.getByTestId('graph-canvas').getByText('return 2;', { exact: true })).toBeVisible();
+    await expect(page.getByTestId(`source-line-${secondLine}`)).toBeInViewport();
+    await expect(page.getByTestId(`source-line-${secondLine}`)).toHaveClass(/highlighted/);
+    await expect(page.getByLabel('Метод в окне кода')).toHaveText('second()');
+    await page.getByRole('button', { name: 'Исходный', exact: true }).click();
+    await expect(page.getByTestId(`source-line-${secondLine}`)).toHaveClass(/highlighted/);
+    await page.getByTestId('graph-canvas').getByText('return 2;', { exact: true }).click();
+    await expect(page.getByTestId(`source-line-${secondLine + 1}`).locator('mark')).toHaveText('return 2;');
+    await page.getByRole('button', { name: /first\(\)/ }).click();
+    await expect(page.getByTestId('source-line-2')).toBeInViewport();
+    await expect(page.getByTestId('source-line-2')).toHaveClass(/highlighted/);
+    await expect(page.getByLabel('Метод в окне кода')).toHaveText('first()');
+  });
+}
+
 test('загрузка Java, выбор метода, связь с кодом, экспорт и восстановление проекта', async ({ page }) => {
   const source = `// Сохранить комментарий\npublic class Demo {
     int total(int amount) {
