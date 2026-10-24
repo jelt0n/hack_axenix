@@ -57,6 +57,9 @@ def test_rules_find_nesting_literal_conditions_and_nested_loops_without_false_po
                 f"/api/projects/{project['id']}/methods/{finding['methodId']}/graph"
             ).json()
             assert finding["nodeId"] in {n["id"] for n in graph["nodes"]}
+            if finding["rule"] in {"nested-loops", "deep-nesting"}:
+                block = next(n for n in graph["nodes"] if n["id"] == finding["nodeId"])
+                assert block["kind"] == "condition" and block["code"] == "j < n"
         assert analysis["methods"][0]["complexity"]["label"] == "O(n²)"
         assert analysis["methods"][1]["complexity"]["label"] == "O(1)"
 

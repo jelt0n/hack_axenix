@@ -57,3 +57,25 @@ test('запоздалый ответ анализа не становится �
   const analysis = page.getByRole('region', { name: 'Диагностика и сложность' });
   await expect(analysis.getByText(/Анализ ревизии/)).toHaveCount(0);
 });
+
+test('находка вложенного цикла выделяет его условие в раскрытом графе', async ({ page }) => {
+  await page.goto('/');
+  await page.getByLabel('Загрузить Java-файл').setInputFiles({
+    name: 'Nested.java', mimeType: 'text/x-java-source', buffer: Buffer.from(`class Nested {
+ int run(int n) {
+  int sum=0;
+  for(int i=0;i<n;i++) {
+   for(int j=0;j<n;j++) sum++;
+  }
+  return sum;
+ }
+}`),
+  });
+  await page.getByRole('button', { name: 'Анализировать', exact: true }).click();
+  const analysis = page.getByRole('region', { name: 'Диагностика и сложность' });
+  await expect(analysis.getByText('O(n²)', { exact: true })).toBeVisible();
+  await analysis.getByRole('button', { name: /Цикл расположен внутри другого цикла/ }).click();
+  await expect(page.getByTestId('source-line-5')).toHaveClass(/highlighted/);
+  await expect(page.locator('.blueprint-node.condition.selected .node-code')).toHaveText('j < n');
+  await expect(page.getByLabel('Код блока', { exact: true })).toHaveValue('j < n');
+});

@@ -10,7 +10,7 @@ import GraphEditor from './GraphEditor';
 type BlueprintNode = Node<{ block: GraphNode }, 'blueprint'>;
 const labels: Record<GraphNode['kind'], string> = {
   entry: 'ВХОД', exit: 'ВЫХОД', condition: 'УСЛОВИЕ', operation: 'ОПЕРАЦИЯ',
-  return: 'ВОЗВРАТ', opaque: 'КОНСТРУКЦИЯ',
+  return: 'ВОЗВРАТ', opaque: 'КОНСТРУКЦИЯ', jump: 'ПЕРЕХОД', control: 'ШАГ ЦИКЛА', dispatch: 'ВЫБОР',
 };
 
 function BlockNode({ data, selected }: NodeProps<BlueprintNode>) {
@@ -34,6 +34,7 @@ function layout(graph: Graph, selected: string | null): BlueprintNode[] {
   const rank = new Map(graph.nodes.map(node => [node.id, 0]));
   const outgoing = new Map<string, string[]>();
   for (const edge of graph.edges) {
+    if (edge.backEdge) continue;
     incoming.set(edge.target, (incoming.get(edge.target) ?? 0) + 1);
     outgoing.set(edge.source, [...(outgoing.get(edge.source) ?? []), edge.target]);
   }
@@ -77,7 +78,7 @@ function GraphCanvas({ graph, selected, onSelect }: {
   const nodes = useMemo(() => layout(graph, selected), [graph, selected]);
   const edges = useMemo(() => graph.edges.map(edge => ({
     ...edge, type: 'smoothstep', markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
-    style: { stroke: edge.label === 'Да' ? '#d98e34' : '#9baab9', strokeWidth: 1.5 },
+    style: { stroke: edge.label === 'Да' ? '#d98e34' : '#9baab9', strokeWidth: 1.5, strokeDasharray: edge.backEdge ? '5 4' : undefined },
     labelStyle: { fill: '#667182', fontSize: 11, fontWeight: 600 },
     labelBgStyle: { fill: '#f6f8fa', fillOpacity: 1 }, labelBgPadding: [6, 4] as [number, number],
   })), [graph]);

@@ -1,0 +1,14 @@
+[
+  {"name":"while","stdout":"8\n","target":"total += n;","replacement":"total += n + 0;"},
+  {"name":"for","stdout":"5\n","target":"total += i;","replacement":"total += i + 0;"},
+  {"name":"do","stdout":"5\n","target":"total += n;","replacement":"total += n + 0;"},
+  {"name":"foreach_array","stdout":"4\n","target":"total += value;","replacement":"total += value + 0;"},
+  {"name":"foreach_list","stdout":"12\n","target":"total += value;","replacement":"total += value + 0;"},
+  {"name":"switch_colon","stdout":"25\n","target":"total += 1;","replacement":"total += 1 + 0;"},
+  {"name":"switch_arrow","stdout":"4\n","target":"total += 4;","replacement":"total += 4 + 0;"},
+  {"name":"nested","stdout":"9\n","target":"total += i + j;","replacement":"total += i + j + 0;"},
+  {"name":"return","stdout":"3\n","target":"total += i;","replacement":"total += i + 0;"},
+  {"name":"infinite_for","stdout":"3\n","target":"n++;","replacement":"n += 1;"},
+  {"name":"unbraced","stdout":"6\n","target":"total += i;","replacement":"total += i + 0;"},
+  {"name":"switch_empty_labels","stdout":"4\n","target":"total += 4;","replacement":"total += 4 + 0;"}
+]

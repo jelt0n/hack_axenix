@@ -17,7 +17,7 @@ export type Project = {
 export type Diagnostic = { message: string; line: number; column: number };
 
 export type GraphNode = {
-  id: string; kind: 'entry' | 'exit' | 'operation' | 'condition' | 'return' | 'opaque';
+  id: string; kind: 'entry' | 'exit' | 'operation' | 'condition' | 'return' | 'opaque' | 'jump' | 'control' | 'dispatch';
   code: string; range: SourceRange;
   editable?: boolean; containerId?: string; index?: number;
 };
@@ -33,7 +33,7 @@ export type GraphEdit = GraphAction & { methodId: string };
 export type MethodGraph = {
   methodId: string; nodes: GraphNode[];
   sourceRevision: number; projectRevision: number; stale: boolean;
-  edges: { id: string; source: string; target: string; label: string }[];
+  edges: { id: string; source: string; target: string; label: string; backEdge?: boolean }[];
   notices: string[];
   containers?: GraphContainer[];
 };

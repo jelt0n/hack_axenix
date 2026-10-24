@@ -204,7 +204,13 @@ public final class BlueprintAnalyzer {
     static Map<String, Object> finding(String rule, String message, String recommendation,
             Node origin, String methodId, Map<String, Object> graph) {
         var range = BlueprintParser.location(origin);
-        var anchor = origin instanceof IfStmt branch ? BlueprintParser.location(branch.getCondition()) : range;
+        Node anchorNode = origin;
+        if (origin instanceof IfStmt branch) anchorNode = branch.getCondition();
+        else if (origin instanceof ForStmt loop) anchorNode = loop.getCompare().<Node>map(value -> value).orElse(loop);
+        else if (origin instanceof WhileStmt loop) anchorNode = loop.getCondition();
+        else if (origin instanceof DoStmt loop) anchorNode = loop.getCondition();
+        else if (origin instanceof SwitchStmt selection) anchorNode = selection.getSelector();
+        var anchor = BlueprintParser.location(anchorNode);
         String nodeId = "";
         long best = Long.MAX_VALUE;
         for (var block : (List<Map<String, Object>>) graph.get("nodes")) {
