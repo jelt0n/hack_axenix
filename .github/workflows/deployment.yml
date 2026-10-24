@@ -20,6 +20,10 @@ jobs:
     env:
       BLUEPRINTS_DOCKER_BIN: docker
       BLUEPRINTS_COMPOSE_BIN: docker compose
+      BLUEPRINTS_BIND: 127.0.0.1
+      BLUEPRINTS_PORT: '18080'
+      COMPOSE_PROJECT_NAME: blueprints-ci
+      COMPOSE_FILE: deploy/compose.yaml
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -53,8 +57,7 @@ jobs:
       - name: Start release with no build or pulls
         run: |
           export DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
-          export BLUEPRINTS_BIND=127.0.0.1 BLUEPRINTS_PORT=18080
-          docker compose --env-file .cache/release/release.env -f deploy/compose.yaml -p blueprints-ci up -d --no-build --pull never --wait --wait-timeout 120
+          docker compose --env-file .cache/release/release.env up -d --no-build --pull never --wait --wait-timeout 120
       - name: Public proxy and independent visitor sessions
         env:
           BLUEPRINTS_DEMO_URL: http://127.0.0.1:18080
@@ -70,10 +73,9 @@ jobs:
         if: always()
         run: |
           export DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
-          export BLUEPRINTS_BIND=127.0.0.1 BLUEPRINTS_PORT=18080
           if test -f .cache/release/release.env; then
-            docker compose --env-file .cache/release/release.env -f deploy/compose.yaml -p blueprints-ci logs --no-color > .cache/deployment.log
-            docker compose --env-file .cache/release/release.env -f deploy/compose.yaml -p blueprints-ci down --timeout 45
+            docker compose --env-file .cache/release/release.env logs --no-color > .cache/deployment.log
+            docker compose --env-file .cache/release/release.env down --timeout 45
           fi
       - name: Upload test evidence
         if: always()

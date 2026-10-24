@@ -21,6 +21,8 @@ def test_release_only_publishes_proxy_and_keeps_docker_with_the_worker():
         "BLUEPRINTS_WORKER_IMAGE": "java-blueprints-worker:release-test",
         "BLUEPRINTS_RUNNER_IMAGE": "java-blueprints-runner:release-test",
         "BLUEPRINTS_PROXY_IMAGE": "java-blueprints-proxy:release-test",
+        "BLUEPRINTS_BIND": "0.0.0.0",
+        "BLUEPRINTS_PORT": "80",
         "DOCKER_GID": "999",
     }
     result = subprocess.run(

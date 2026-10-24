@@ -21,6 +21,12 @@ test('public proxy preserves sessions, runs Java and keeps the queue responsive'
     expect(another.id).not.toBe(original.id);
     expect((await first.request.get(`/api/projects/${another.id}`)).status()).toBe(404);
 
+    await page.getByRole('button', { name: 'Проверить поведение', exact: true }).click();
+    await page.getByRole('button', { name: 'Запустить проверку', exact: true }).click();
+    await expect(page.getByTestId('check-status')).toContainText('Результаты совпали', { timeout: 60000 });
+    await expect(page.getByLabel('Исходная версия: stdout')).toHaveText('Итого: 1125');
+    await expect(page.getByLabel('Рабочая версия: stdout')).toHaveText('Итого: 1125');
+
     await page.getByLabel('Загрузить Java-файл').setInputFiles({
       name: 'Echo.java', mimeType: 'text/x-java-source',
       buffer: Buffer.from('public class Echo { public static void main(String[] a) { System.out.println(new java.util.Scanner(System.in).nextLine()); } }'),
@@ -49,6 +55,7 @@ test('public proxy preserves sessions, runs Java and keeps the queue responsive'
     expect(queued.status()).toBe(202);
     const waiting = await queued.json();
     expect(waiting.status).toBe('queued');
+    expect(waiting.queuePosition).toBeGreaterThan(0);
     const excess = await first.request.post(endpoint, { data: payload });
     expect(excess.status()).toBe(429);
     expect((await excess.json()).detail).toBeTruthy();
@@ -60,7 +67,8 @@ test('public proxy preserves sessions, runs Java and keeps the queue responsive'
     await expect(page.getByRole('heading', { name: 'Loop.java' })).toBeVisible();
     // A reload restores the latest queued check and its position through the real UI.
     await page.getByRole('button', { name: 'Проверить поведение', exact: true }).click();
-    await expect(page.getByTestId('check-status')).toContainText(/В очереди|Выполняется|Проверка не завершена/);
+    await expect(page.getByTestId('check-status')).toContainText('В очереди', { timeout: 2000 });
+    await expect(page.getByText(/Позиция в очереди:/)).toBeVisible({ timeout: 2000 });
     for (const id of [active.id, waiting.id]) {
       await expect.poll(async () => (await (await first.request.get(`/api/checks/${id}`)).json()).status,
         { timeout: 60000 }).toBe('failed');
