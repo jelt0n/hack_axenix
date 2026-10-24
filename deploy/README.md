@@ -19,9 +19,10 @@
 ## Сборка и проверки вне сервера
 
 Workflow `.github/workflows/deployment.yml` запускается для PR, `main` и ветки #11.
-Он собирает образы, проверяет Python/TypeScript, API, браузер, настоящий исполнитель
-и развёртывание за прокси. Архив релиза публикуется только после успешных проверок.
-В нём нет исходников для сборки, секретов, Docker socket или пользовательских проектов.
+Он собирает образы, проверяет Python/TypeScript, API, браузер, настоящий исполнитель,
+импорт архива в новый Docker с containerd и развёртывание за прокси.
+Архив релиза публикуется только после успешных проверок. В нём нет исходников
+приложения для сборки, секретов, Docker socket или пользовательских проектов.
 
 На отдельной машине Linux/amd64 с Docker, Compose, Python 3.12+, uv, Node 22.12+
 и JDK 21 тот же процесс можно выполнить вручную из чистого коммита:
@@ -44,9 +45,16 @@ npm run test:e2e
 `build_release.py` собирает экспорт `git archive HEAD`, поэтому незакоммиченные
 локальные файлы не попадают в образы. Он создаёт новый каталог и отказывается
 перезаписывать существующий.
-`manifest.json` содержит коммит и ID каждого образа. `release.env` закрепляет именно
-ID, а `images.tar.gz` переносит их без registry. `SHA256SUMS` проверяет целостность
-доставки. Базовые теги Dockerfile могут обновляться; повторная сборка того же коммита
+`manifest.json` содержит коммит, теги, ID машины сборки и переносимые хеши конфигураций.
+`release.env` используется только на машине сборки. Архив сохраняет именованные
+теги, чтобы Docker загрузил все четыре образа, включая containerd image store.
+`load_release.py` проверяет SHA-256, импортирует архив и повторным экспортом сверяет
+сырые конфигурации образов: они включают настройки запуска и RootFS diff_ids.
+После проверки он создаёт **`runtime.env` с ID текущего хоста**. Именно этот файл
+используйте для запуска и отката: ID между classic/containerd могут различаться
+([зафиксированная особенность Docker](https://github.com/moby/moby/issues/51934)).
+Сборки на сервере и обращения к registry при этом нет. `SHA256SUMS` проверяет
+целостность доставки. Базовые теги Dockerfile могут обновляться; повторная сборка того же коммита
 не обещает побайтового совпадения. Для повторного запуска используйте сохранённый
 проверенный архив, а не пересборку.
 
@@ -90,13 +98,13 @@ TCP/8000, 2375 и 2376 открывать не требуется. Перед з
 ```bash
 cd /opt/blueprints/releases/COMMIT
 sha256sum -c SHA256SUMS
-docker image load -i images.tar.gz
+python3 load_release.py .
 install -d -m 700 /opt/blueprints
 printf 'DOCKER_GID=%s\nBLUEPRINTS_BIND=0.0.0.0\nBLUEPRINTS_PORT=80\n' \
   "$(stat -c '%g' /var/run/docker.sock)" > /opt/blueprints/operator.env
-docker compose --env-file release.env --env-file /opt/blueprints/operator.env \
+docker compose --env-file runtime.env --env-file /opt/blueprints/operator.env \
   -f compose.yaml -p blueprints-demo config --quiet
-docker compose --env-file release.env --env-file /opt/blueprints/operator.env \
+docker compose --env-file runtime.env --env-file /opt/blueprints/operator.env \
   -f compose.yaml -p blueprints-demo up -d --no-build --pull never --wait --wait-timeout 120
 curl --fail http://127.0.0.1/api/health
 curl --fail http://127.0.0.1/api/runner
@@ -128,17 +136,17 @@ ln -s /opt/blueprints/releases/COMMIT /opt/blueprints/current
 ## Обновление, резервная копия и откат
 
 Сначала доставьте и проверьте новый архив в новом каталоге. Сохраните старые
-`release.env`, `compose.yaml`, `manifest.json`, образы и `/opt/blueprints/operator.env`.
+`runtime.env`, `release.env`, `compose.yaml`, `manifest.json`, образы и `/opt/blueprints/operator.env`.
 В окне обслуживания из каталога **текущего** релиза:
 
 ```bash
-docker compose --env-file release.env --env-file /opt/blueprints/operator.env \
+docker compose --env-file runtime.env --env-file /opt/blueprints/operator.env \
   -f compose.yaml -p blueprints-demo stop proxy worker api
 ```
 
 После остановки всех писателей скопируйте весь том `blueprints-demo_projects`
 в отдельный архив, включая SQLite WAL/SHM, если они есть. Например, используя ID
-текущего API из `release.env` и новый каталог резервной копии:
+текущего API из `runtime.env` и новый каталог резервной копии:
 
 ```bash
 mkdir -p /opt/blueprints/backups/BEFORE_COMMIT
@@ -153,7 +161,7 @@ docker run --rm --network none --read-only --user 0:0 \
 `ln -sfn /opt/blueprints/releases/NEW_COMMIT /opt/blueprints/current`.
 
 Если запуск или проверки не прошли, остановите новый комплект и выполните `up`
-из старого каталога с его `release.env`. Эта задача не меняет схему SQLite, поэтому
+из старого каталога с его `runtime.env`. Эта задача не меняет схему SQLite, поэтому
 для её отката достаточно прежних образов. Для будущего релиза с миграцией данных
 сначала согласуйте восстановление резервной копии: это теряет записи после снимка.
 Не выполняйте `down -v` и не удаляйте общий том при штатном обновлении или откате.

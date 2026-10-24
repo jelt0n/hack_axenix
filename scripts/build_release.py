@@ -11,6 +11,8 @@ import tarfile
 import tempfile
 from pathlib import Path
 
+from load_release import archive_configs
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -63,8 +65,6 @@ def build_bundle(root: Path, destination: Path, revision: str) -> None:
         name: output("docker", "image", "inspect", tag, "--format", "{{.Id}}")
         for name, tag in images.items()
     }
-    manifest = {"revision": revision, "platform": "linux/amd64", "images": identities}
-    (destination / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     (destination / "release.env").write_text(
         "".join(
             f"BLUEPRINTS_{name.upper()}_IMAGE={identity}\n" for name, identity in identities.items()
@@ -72,13 +72,22 @@ def build_bundle(root: Path, destination: Path, revision: str) -> None:
     )
     shutil.copyfile(root / "deploy/compose.yaml", destination / "compose.yaml")
     shutil.copyfile(root / "deploy/README.md", destination / "README.md")
+    shutil.copyfile(root / "scripts/load_release.py", destination / "load_release.py")
     with subprocess.Popen(
-        ["docker", "image", "save", *identities.values()], stdout=subprocess.PIPE
+        ["docker", "image", "save", *images.values()], stdout=subprocess.PIPE
     ) as save:
         with gzip.open(destination / "images.tar.gz", "wb", compresslevel=1) as archive:
             shutil.copyfileobj(save.stdout, archive)
         if save.wait():
             raise SystemExit("docker image save failed; discard the incomplete release")
+    manifest = {
+        "revision": revision,
+        "platform": "linux/amd64",
+        "images": identities,
+        "tags": images,
+        "configs": archive_configs(destination / "images.tar.gz", images),
+    }
+    (destination / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     with (destination / "SHA256SUMS").open("w") as checksums:
         for path in sorted(destination.iterdir()):
             if path.name != "SHA256SUMS":

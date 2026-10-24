@@ -41,17 +41,23 @@ jobs:
           python -m pip install uv==0.13.1
           python scripts/setup.py
           npx playwright install-deps chromium
-      - name: Build immutable offline release outside the demo server
-        run: |
-          python scripts/build_release.py .cache/release
-          cat .cache/release/release.env >> "$GITHUB_ENV"
       - name: Standards and types
         run: |
           .venv/bin/ruff check backend tests scripts
           .venv/bin/ruff format --check backend tests scripts
           npm run typecheck
+      - name: Build immutable offline release outside the demo server
+        run: |
+          python scripts/build_release.py .cache/release
+          cat .cache/release/release.env >> "$GITHUB_ENV"
+      - name: Import archive into a fresh containerd image store
+        env:
+          BLUEPRINTS_RELEASE_DIR: .cache/release
+        run: |
+          docker pull docker:29-dind
+          .venv/bin/pytest tests/test_release_import.py -q --junitxml=.cache/import.xml
       - name: API and actual Docker limits
-        run: .venv/bin/pytest -q --junitxml=.cache/pytest.xml
+        run: .venv/bin/pytest --ignore=tests/test_release_import.py -q --junitxml=.cache/pytest.xml
       - name: Browser with actual Docker execution
         run: npm run test:e2e
       - name: Start release with no build or pulls
@@ -84,6 +90,7 @@ jobs:
           name: deployment-evidence-${{ github.sha }}
           path: |
             .cache/pytest.xml
+            .cache/import.xml
             .cache/deployment.log
             test-results/
           retention-days: 7
