@@ -1,0 +1,96 @@
+name: Deployment release
+
+on:
+  push:
+    branches: [main, feat/issue-11-public-demo]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deployment-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      BLUEPRINTS_DOCKER_BIN: docker
+      BLUEPRINTS_COMPOSE_BIN: docker compose
+      BLUEPRINTS_BIND: 127.0.0.1
+      BLUEPRINTS_PORT: '18080'
+      COMPOSE_PROJECT_NAME: blueprints-ci
+      COMPOSE_FILE: deploy/compose.yaml
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Prepare dependencies
+        run: |
+          python -m pip install uv==0.13.1
+          python scripts/setup.py
+          npx playwright install-deps chromium
+      - name: Standards and types
+        run: |
+          .venv/bin/ruff check backend tests scripts
+          .venv/bin/ruff format --check backend tests scripts
+          npm run typecheck
+      - name: Build immutable offline release outside the demo server
+        run: |
+          python scripts/build_release.py .cache/release
+          cat .cache/release/release.env >> "$GITHUB_ENV"
+      - name: Import archive into a fresh containerd image store
+        env:
+          BLUEPRINTS_RELEASE_DIR: .cache/release
+        run: |
+          docker pull docker:29-dind
+          .venv/bin/pytest tests/test_release_import.py -q --junitxml=.cache/import.xml
+      - name: API and actual Docker limits
+        run: .venv/bin/pytest --ignore=tests/test_release_import.py -q --junitxml=.cache/pytest.xml
+      - name: Browser with actual Docker execution
+        run: npm run test:e2e
+      - name: Start release with no build or pulls
+        run: |
+          export DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
+          docker compose --env-file .cache/release/release.env up -d --no-build --pull never --wait --wait-timeout 120
+      - name: Public proxy and independent visitor sessions
+        env:
+          BLUEPRINTS_DEMO_URL: http://127.0.0.1:18080
+        run: npx playwright test --config deploy/playwright.config.ts
+      - name: Upload verified release
+        uses: actions/upload-artifact@v4
+        with:
+          name: blueprints-release-${{ github.sha }}
+          path: .cache/release/
+          compression-level: 0
+          retention-days: 7
+      - name: Collect deployment logs
+        if: always()
+        run: |
+          export DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
+          if test -f .cache/release/release.env; then
+            docker compose --env-file .cache/release/release.env logs --no-color > .cache/deployment.log
+            docker compose --env-file .cache/release/release.env down --timeout 45
+          fi
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-evidence-${{ github.sha }}
+          path: |
+            .cache/pytest.xml
+            .cache/import.xml
+            .cache/deployment.log
+            test-results/
+          retention-days: 7
