@@ -11,6 +11,7 @@ type BlueprintNode = Node<{ block: GraphNode }, 'blueprint'>;
 const labels: Record<GraphNode['kind'], string> = {
   entry: 'ВХОД', exit: 'ВЫХОД', condition: 'УСЛОВИЕ', operation: 'ОПЕРАЦИЯ',
   return: 'ВОЗВРАТ', opaque: 'КОНСТРУКЦИЯ', jump: 'ПЕРЕХОД', control: 'ШАГ ЦИКЛА', dispatch: 'ВЫБОР',
+  exception: 'ИСКЛЮЧЕНИЯ', completion: 'ПРОДОЛЖЕНИЕ',
 };
 
 function BlockNode({ data, selected }: NodeProps<BlueprintNode>) {
@@ -120,7 +121,7 @@ export default function MethodGraph({ graph, method, selected, onSelect, loading
           <strong>{stale ? 'Модель проекта изменилась' : method ? method.hasBody ? 'Граф недоступен' : 'У объявления нет тела' : 'Здесь появится структура метода'}</strong>
           <span>{stale ? 'Загрузите актуальную версию или разрешите конфликт сохранения.' : method ? 'Интерфейсы и абстрактные методы сохраняются в исходнике.' : 'Загрузите Java-файл или откройте пример.'}</span>
         </div>}
-      {graph && graph.notices.length > 0 && <div className="graph-notice" role="note">{graph.notices[0]}</div>}
+      {graph && graph.notices.length > 0 && <div className="graph-notice" role="note">{graph.notices.join(' ')}</div>}
       {graph && !loading && <GraphEditor graph={graph} selected={graph.nodes.find(node => node.id === selected) ?? null}
         disabled={stale || editDisabled} onEdit={onEdit} />}
       <div className="graph-legend"><span><i className="legend-operation" />Операция</span>
