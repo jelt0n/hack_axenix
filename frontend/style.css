@@ -389,21 +389,6 @@ a {
   line-height:1.9;
 }
 
-.sidebar-bottom>svg {
-  color:#bdc7d5;
-  margin-bottom:9px;
-}
-
-.sidebar-bottom strong {
-  display:block;
-  color:#7c8a9d;
-  font-size:var(--text-sm);
-}
-
-.sidebar-bottom p {
-  margin:5px 0 10px;
-}
-
 .sidebar-bottom button {
   border:0;
   background:none;

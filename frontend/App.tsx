@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  ArrowDownToLine, ArrowRight, BookOpen, Box, Braces, Check, ChevronDown,
+  ArrowDownToLine, ArrowRight, Box, Braces, Check, ChevronDown,
   ChevronRight, CircleHelp, FileCode2, FolderOpen, GitBranch, Layers3,
   LoaderCircle, PanelLeftClose, Play, Upload, X, Terminal,
 } from 'lucide-react';
@@ -205,7 +205,7 @@ export default function App() {
             {project.methods.length === 0 && <p className="sidebar-empty">В файле нет методов. Объявления сохранены в коде.</p>}
           </> : <div className="sidebar-empty"><FileCode2 size={24} /><p>Файлы появятся здесь<br />после импорта Java</p></div>}
           <button className="sidebar-import" onClick={() => input.current?.click()} disabled={busy || (editor.dirty && !editor.localSaved)}><Upload size={14} />Загрузить .java</button>
-          <div className="sidebar-bottom"><BookOpen size={17} /><strong>Код, который можно понять</strong><p>Исследуйте структуру метода, сохраняя Java перед глазами.</p>
+          <div className="sidebar-bottom">
             <button onClick={() => setHelp(true)}>Как это работает <ArrowRight size={13} /></button></div>
         </aside>
 
