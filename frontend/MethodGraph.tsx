@@ -88,7 +88,7 @@ function GraphCanvas({ graph, selected, onSelect }: {
   })), [graph]);
   return (
     <div className="graph-canvas" data-testid="graph-canvas" ref={container}
-      onPointerDownCapture={event => {
+      onClickCapture={event => {
         if (event.target instanceof Element && event.target.closest('.react-flow__controls')) manualViewport.current = true;
       }}>
       <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} nodesDraggable={false}
