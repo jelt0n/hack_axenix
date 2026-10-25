@@ -69,7 +69,15 @@ def test_selected_file_edits_do_not_touch_siblings_and_are_private(tmp_path):
         file_id = added["fileId"]
         selected = url + "?fileId=" + file_id
         assert other.get(selected).status_code == 404
-        for path in ["../Bad.java", "/Bad.java", "a//B.java", "a/../B.java", "a\\B.java"]:
+        for path in [
+            "../Bad.java",
+            "/Bad.java",
+            "a//B.java",
+            "a/../B.java",
+            "a\\B.java",
+            "A.java.java",
+            "Main.java/Helper.java",
+        ]:
             assert (
                 client.post(url + "/files", json={"revision": 2, "path": path}).status_code == 422
             )

@@ -43,3 +43,25 @@ test('консоль принимает кириллицу и показывае
   await expect(page.getByLabel('Рабочая версия: stderr')).toHaveText('Диагностика');
   });
 });
+
+test('ошибка хранения черновика не позволяет потерять текст переключением файла', async ({page}) => {
+  await page.addInitScript(() => {
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = function(key, value) {
+      if(key.startsWith('java-draft:')) throw new DOMException('Full', 'QuotaExceededError');
+      return original.call(this,key,value);
+    };
+  });
+  await page.goto('/');
+  await page.getByRole('button',{name:'Открыть пример',exact:true}).click();
+  await page.getByRole('button',{name:'Создать Java-файл',exact:true}).click();
+  await page.getByLabel('Путь Java-файла').fill('Helper.java');
+  await page.getByRole('button',{name:'Сохранить файл',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'Helper.java',exact:true})).toBeVisible();
+  await replaceJavaSource(page,'public class Helper { int value() { return 17; } }',false);
+  await expect(page.getByText(/Не удалось сохранить черновик в браузере/)).toBeVisible();
+  await expect(page.getByRole('button',{name:'Открыть файл OrderCalculator.java',exact:true})).toBeDisabled();
+  await expect(page.locator('.monaco-editor')).toContainText('return 17;');
+  await page.getByRole('button',{name:'Обновить граф',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Открыть файл OrderCalculator.java',exact:true})).toBeEnabled();
+});

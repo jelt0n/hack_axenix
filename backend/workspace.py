@@ -30,9 +30,8 @@ def java_path(value: str) -> str:
     if (
         len(value) > 240
         or not value.endswith(".java")
-        or any(
-            not p or p in (".", "..") or not p.replace(".java", "").isidentifier() for p in parts
-        )
+        or any(not part.isidentifier() for part in parts[:-1])
+        or not parts[-1].removesuffix(".java").isidentifier()
         or "\\" in value
         or any(ord(c) < 32 for c in value)
     ):

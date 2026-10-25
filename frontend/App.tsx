@@ -8,6 +8,7 @@ import { api, ApiError } from './api';
 import { exampleSource } from './example';
 import MethodGraph from './MethodGraph';
 import FileExplorer from './FileExplorer';
+import { removeDraft } from './drafts';
 import SourceView from './SourceView';
 import CheckPanel from './CheckPanel';
 import AnalysisPanel from './AnalysisPanel';
@@ -157,7 +158,7 @@ export default function App() {
   }
 
   async function selectFile(fileId: string) {
-    if (!project || editor.saving) return;
+    if (!project || editor.saving || (editor.dirty && !editor.localSaved)) return;
     setBusy(true); setError(null);
     try { openProject(await api.project(project.id, fileId)); }
     catch (reason) { setError(reason instanceof Error ? reason.message : 'Не удалось открыть файл'); }
@@ -165,8 +166,7 @@ export default function App() {
   }
   function changeFiles(next: Project) {
     for (const removed of project?.files.filter(file => !next.files.some(item => item.id === file.id)) ?? []) {
-      sessionStorage.removeItem(`java-draft:${next.id}:${removed.id}`);
-      if (removed.id.startsWith("file-")) sessionStorage.removeItem(`java-draft:${next.id}`);
+      try { removeDraft(next.id,removed.id); } catch { /* Deleted files cannot block project execution. */ }
     }
     if (next.fileId === project?.fileId) editor.acceptFileChange(next);
     else openProject(next);
@@ -192,7 +192,7 @@ export default function App() {
           <div className="sidebar-title">ОБОЗРЕВАТЕЛЬ <Layers3 size={14} /></div>
           <div className="project-folder"><ChevronDown size={14} /><FolderOpen size={16} />{project ? 'java-project' : 'Новый проект'}</div>
           {project ? <>
-            <FileExplorer project={project} pendingChanges={editor.pendingFiles || editor.dirty} disabled={busy || editor.saving} onSelect={selectFile} onChange={changeFiles} />
+            <FileExplorer project={project} pendingChanges={editor.pendingFiles || editor.dirty} disabled={busy || editor.saving || (editor.dirty && !editor.localSaved)} onSelect={selectFile} onChange={changeFiles} />
             <div className="methods-label">МЕТОДЫ <span>{project.methods.length}</span></div>
             <nav className="methods" aria-label="Методы программы">{[...groups].map(([owner, methods]) => <div key={owner}>
               <div className="class-label"><Box size={12} />{owner || 'Без класса'}</div>
@@ -204,7 +204,7 @@ export default function App() {
             </div>)}</nav>
             {project.methods.length === 0 && <p className="sidebar-empty">В файле нет методов. Объявления сохранены в коде.</p>}
           </> : <div className="sidebar-empty"><FileCode2 size={24} /><p>Файлы появятся здесь<br />после импорта Java</p></div>}
-          <button className="sidebar-import" onClick={() => input.current?.click()} disabled={busy}><Upload size={14} />Загрузить .java</button>
+          <button className="sidebar-import" onClick={() => input.current?.click()} disabled={busy || (editor.dirty && !editor.localSaved)}><Upload size={14} />Загрузить .java</button>
           <div className="sidebar-bottom"><BookOpen size={17} /><strong>Код, который можно понять</strong><p>Исследуйте структуру метода, сохраняя Java перед глазами.</p>
             <button onClick={() => setHelp(true)}>Как это работает <ArrowRight size={13} /></button></div>
         </aside>
@@ -212,7 +212,7 @@ export default function App() {
         <main className="workspace">
           <div className="workspace-toolbar">
             <div className="breadcrumbs">Рабочая область <ChevronRight size={13} /><span>{project?.filename || 'Начало работы'}</span></div>
-            <div className="toolbar-actions"><button className="button secondary" onClick={() => input.current?.click()} disabled={busy}>
+            <div className="toolbar-actions"><button className="button secondary" onClick={() => input.current?.click()} disabled={busy || (editor.dirty && !editor.localSaved)}>
               {busy ? <LoaderCircle size={15} className="spin" /> : <Upload size={15} />}Импорт Java</button>
               <button className="button secondary" aria-label="Экспорт Java" onClick={exportSource} disabled={!project || busy}><ArrowDownToLine size={15} />Экспорт Java</button>
               {project && <button className="button secondary" aria-label="Открыть консоль" onClick={() => setChecksOpen(true)}><Terminal size={15} />Консоль</button>}
@@ -229,8 +229,8 @@ export default function App() {
               <div className="welcome-art"><div className="art-code"><Braces size={29} /><span>Java</span></div><div className="art-connector" /><div className="art-graph"><GitBranch size={30} /></div></div>
               <div className="eyebrow">ОТ КОДА К ПОНИМАНИЮ</div><h1>Увидеть логику.<br /><span>Понять программу.</span></h1>
               <p className="welcome-description">Превратите Java-код в понятную схему.<br />Исследуйте методы, ветвления и путь выполнения.</p>
-              <div className="welcome-actions"><button className="button primary large" disabled={busy} onClick={() => input.current?.click()}><Upload size={17} />Загрузить Java-файл</button>
-                <button className="button secondary large" disabled={busy} onClick={() => void importSource('OrderCalculator.java', exampleSource)}>{busy ? <LoaderCircle size={17} className="spin" /> : <GitBranch size={17} />}Открыть пример</button></div>
+              <div className="welcome-actions"><button className="button primary large" disabled={busy || (editor.dirty && !editor.localSaved)} onClick={() => input.current?.click()}><Upload size={17} />Загрузить Java-файл</button>
+                <button className="button secondary large" disabled={busy || (editor.dirty && !editor.localSaved)} onClick={() => void importSource('OrderCalculator.java', exampleSource)}>{busy ? <LoaderCircle size={17} className="spin" /> : <GitBranch size={17} />}Открыть пример</button></div>
               <div className="drop-note">или перетащите .java сюда <span>·</span> до 256 КБ</div>
               <div className="welcome-features"><span><Check size={14} />Без регистрации</span><span><Check size={14} />Исходник сохранён</span><span><Check size={14} />Экспорт в Java</span></div>
             </div> : <>
