@@ -57,21 +57,24 @@ function layout(graph: Graph, selected: string | null): BlueprintNode[] {
     .sort((a, b) => a.range.startLine - b.range.startLine || a.id.localeCompare(b.id))
     .map((block, index) => ({
       id: block.id, type: 'blueprint' as const, data: { block }, selected: block.id === selected,
-      position: { x: (index - (blocks.length - 1) / 2) * 310, y: row * 128 },
+      position: { x: (index - (blocks.length - 1) / 2) * 360, y: row * 128 },
     })));
 }
 
 function GraphCanvas({ graph, selected, onSelect }: {
   graph: Graph; selected: string | null; onSelect: (block: GraphNode) => void;
 }) {
-  const { fitView } = useReactFlow();
+  const { fitView, zoomTo } = useReactFlow();
   const container = useRef<HTMLDivElement>(null);
+  const manualViewport = useRef(false);
   useEffect(() => {
     if (!container.current) return;
     let frame = 0;
     const observer = new ResizeObserver(() => {
       cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => { void fitView({ padding: 0.2, maxZoom: 1 }); });
+      frame = requestAnimationFrame(() => {
+        if (!manualViewport.current) void fitView({ padding: 0.2, maxZoom: 1 });
+      });
     });
     observer.observe(container.current);
     return () => { observer.disconnect(); cancelAnimationFrame(frame); };
@@ -80,20 +83,28 @@ function GraphCanvas({ graph, selected, onSelect }: {
   const edges = useMemo(() => graph.edges.map(edge => ({
     ...edge, type: 'smoothstep', markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
     style: { stroke: edge.label === 'Да' ? '#d98e34' : '#9baab9', strokeWidth: 1.5, strokeDasharray: edge.backEdge ? '5 4' : undefined },
-    labelStyle: { fill: '#667182', fontSize: 11, fontWeight: 600 },
+    labelStyle: { fill: '#667182', fontSize: 14, fontWeight: 600 },
     labelBgStyle: { fill: '#f6f8fa', fillOpacity: 1 }, labelBgPadding: [6, 4] as [number, number],
   })), [graph]);
   return (
-    <div className="graph-canvas" data-testid="graph-canvas" ref={container}>
+    <div className="graph-canvas" data-testid="graph-canvas" ref={container}
+      onClickCapture={event => {
+        if (event.target instanceof Element && event.target.closest('.react-flow__controls')) manualViewport.current = true;
+      }}>
       <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} nodesDraggable={false}
         nodesConnectable={false} edgesFocusable={false} onNodeClick={(_, node) => onSelect(node.data.block)}
+        onMoveStart={event => { if (event) manualViewport.current = true; }}
         fitView fitViewOptions={{ padding: 0.2, maxZoom: 1 }} minZoom={0.2} maxZoom={1.7}>
         <Background variant={BackgroundVariant.Dots} gap={18} size={1} color="#ced6df" />
         <Controls showInteractive={false} position="bottom-left" />
       </ReactFlow>
-      <button className="fit-button" aria-label="Вписать граф" onClick={() => void fitView({ padding: 0.2, duration: 250 })}>
-        <Maximize2 size={15} /> Вписать
-      </button>
+      <div className="graph-view-actions">
+        <button className="fit-button" aria-label="Масштаб графа 100%" title="Показать блоки в натуральном размере"
+          onClick={() => { manualViewport.current = true; void zoomTo(1, { duration: 200 }); }}>100%</button>
+        <button className="fit-button" aria-label="Вписать граф" onClick={() => {
+          manualViewport.current = false; void fitView({ padding: 0.2, duration: 250 });
+        }}><Maximize2 size={15} /> Вписать</button>
+      </div>
       <div className="canvas-hint">Потяните фон, чтобы переместить граф</div>
     </div>
   );
