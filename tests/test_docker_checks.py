@@ -348,3 +348,105 @@ def test_one_worker_keeps_the_next_job_queued(tmp_path):
         assert client.get(f"/api/checks/{second['id']}").json()["status"] == "queued"
         run_worker(tmp_path, once=True)
         assert client.get(f"/api/checks/{second['id']}").json()["result"]["verdict"] == "matched"
+
+
+def test_split_monolith_compiles_all_files_and_keeps_queued_snapshot(tmp_path):
+    source = (
+        "public class Main { public static void main(String[] a) { "
+        "System.out.println(new Price().value()); } } "
+        "class Price { int value() { return 5; } }"
+    )
+    with TestClient(create_app(tmp_path)) as client:
+        project = client.post(
+            "/api/projects", json={"filename": "Main.java", "source": source}
+        ).json()
+        url = f"/api/projects/{project['id']}"
+        main_id = project["fileId"]
+        helper = client.post(
+            url + "/files",
+            json={
+                "revision": 1,
+                "path": "Price.java",
+                "source": "class Price { int value() { return 5; } }",
+            },
+        ).json()
+        changed = client.post(
+            url + "/source?fileId=" + main_id,
+            json={"revision": 2, "source": source.split(" class Price")[0]},
+        )
+        assert changed.status_code == 200, changed.text
+        request = {"revision": 3, "scenarios": [{"name": "Разделение", "stdin": ""}]}
+        job = client.post(url + "/checks", json=request)
+        assert job.status_code == 202, job.text
+        changed = client.post(
+            url + "/source?fileId=" + helper["fileId"],
+            json={"revision": 3, "source": "class Price { int value() { return 6; } }"},
+        )
+        assert changed.status_code == 200
+        run_worker(tmp_path, once=True)
+        completed = client.get("/api/checks/" + job.json()["id"]).json()
+        assert completed["sourceRevision"] == 3
+        assert completed["result"]["verdict"] == "matched", completed
+        assert completed["result"]["cases"][0]["working"]["stdout"] == "5\n"
+        next_job = client.post(url + "/checks", json={**request, "revision": 4}).json()
+        run_worker(tmp_path, once=True)
+        result = client.get("/api/checks/" + next_job["id"]).json()
+        assert result["result"]["verdict"] == "different", result
+        assert result["result"]["cases"][0]["original"]["stdout"] == "5\n"
+        assert result["result"]["cases"][0]["working"]["stdout"] == "6\n"
+
+
+def test_checked_exception_without_catch_or_throws_is_a_compilation_error(tmp_path):
+    source = (
+        "public class Bad { static void fail() throws java.io.IOException { "
+        'throw new java.io.IOException("x"); } '
+        "public static void main(String[] a) { fail(); } }"
+    )
+    with TestClient(create_app(tmp_path)) as client:
+        project = client.post(
+            "/api/projects", json={"filename": "Bad.java", "source": source}
+        ).json()
+        job = client.post(
+            f"/api/projects/{project['id']}/checks",
+            json={"revision": 1, "scenarios": [{"name": "Checked", "stdin": ""}]},
+        ).json()
+        run_worker(tmp_path, once=True)
+        result = client.get("/api/checks/" + job["id"]).json()
+        assert result["result"]["verdict"] == "inconclusive"
+        assert result["result"]["error"]["kind"] == "compile_error"
+        assert "unreported exception" in result["result"]["cases"][0]["original"]["stderr"]
+
+
+def test_main_can_move_to_another_file_without_changing_original_entry_point(tmp_path):
+    source = (
+        "public class OldMain { public static void main(String[] a) { "
+        'System.out.println("same"); } }'
+    )
+    with TestClient(create_app(tmp_path)) as client:
+        project = client.post(
+            "/api/projects", json={"filename": "OldMain.java", "source": source}
+        ).json()
+        url = f"/api/projects/{project['id']}"
+        added = client.post(
+            url + "/files",
+            json={
+                "revision": 1,
+                "path": "NewMain.java",
+                "source": source.replace("OldMain", "NewMain"),
+            },
+        ).json()
+        assert added["originalEntryPoints"] == ["OldMain"]
+        deleted = client.delete(url + "/files/" + project["fileId"] + "?revision=2")
+        assert deleted.status_code == 200, deleted.text
+        job = client.post(
+            url + "/checks",
+            json={"revision": 3, "scenarios": [{"name": "Перенос main", "stdin": ""}]},
+        )
+        assert job.status_code == 202, job.text
+        assert job.json()["mainClass"] == "NewMain"
+        assert job.json()["originalMainClass"] == "OldMain"
+        run_worker(tmp_path, once=True)
+        result = client.get("/api/checks/" + job.json()["id"]).json()
+        assert result["result"]["verdict"] == "matched", result
+        assert result["result"]["cases"][0]["original"]["stdout"] == "same\n"
+        assert result["result"]["cases"][0]["working"]["stdout"] == "same\n"

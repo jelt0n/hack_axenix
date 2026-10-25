@@ -1,7 +1,8 @@
 # Проверенная база Java (#7)
 
 Корпус исполняется на JDK 21 с JavaParser 3.27.1. Технический документ организаторов
-не предоставлен, поэтому полный обязательный перечень типов и реализаций неизвестен.
+не предоставлен; доступен обязательный слайд Axenix с четырьмя разделами.
+Явно перечисленные типы сопоставлены с корпусом в docs/workspace.md.
 Матрица описывает конкретные проверенные примеры, а не всю Java или API.
 
 | Область | Проверенный пример | Файл корпуса |
@@ -16,16 +17,23 @@
 | Утилиты | Arrays.sort/toString, Collections.sort, Comparator.naturalOrder, Optional.of/orElse, List.of/Set.of/Map.of | `collections` |
 | Checked/custom exceptions | throws, throw, пользовательский Exception, catch, finally | `caught` |
 | Unchecked/custom exceptions | RuntimeException, неперехваченное исключение: тип/сообщение/cause/suppressed и код завершения отдельно от stderr | `uncaught` |
+| Исключения java.util | NoSuchElementException при пустом Iterator, InputMismatchException при нечисловом вводе Scanner | `util_exceptions` |
 | Вложенная обработка | IOException, IllegalArgumentException, IllegalStateException, RuntimeException, multi-catch, повторный throw из catch, вложенные finally | `multi_catch` |
 | Abrupt completion | return через вложенные finally, break/continue через finally, return из finally заменяет ожидающий return; finally внутри finally | `nested_finally`, `finally_override`, `nested_cleanup` |
 
 Файлы: [tests/fixtures/java_coverage](../tests/fixtures/java_coverage).
-Каждый из десяти примеров импортируется, экспортируется без изменений и повторно
+Каждый из одиннадцати примеров импортируется, экспортируется без изменений и повторно
 импортируется, получает структурную правку выбранной операции и проходит настоящий
 javac и сравнение двух версий в Docker. Ожидаемые stdout/stderr, исключения и код
 завершения заданы литералами в `cases.json`. Текст вне выбранного метода или
 конструктора проверяется на сохранение. Браузерный сценарий выбирает конструктор,
 затем правит catch и сравнивает результат с кириллицей.
+
+Дополнительно `test_checked_exception_without_catch_or_throws_is_a_compilation_error`
+проверяет реальный отказ javac: синтаксически корректная программа вызывает
+метод с checked IOException без catch/throws. Результат — compile_error/inconclusive,
+не успешное совпадение. Обязательные направления со слайда Axenix сведены
+в [проводнике и консоли](workspace.md#сверка-с-обязательным-слайдом-axenix).
 
 ## Как читать исключения на графе
 

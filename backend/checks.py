@@ -10,6 +10,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from backend.workspace import sources
+
 
 class Scenario(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -30,7 +32,9 @@ class CheckRequest(BaseModel):
     scenarios: list[Scenario] = Field(min_length=1, max_length=5)
     mainClass: str | None = Field(default=None, min_length=1, max_length=200)
 
-    @field_validator("mainClass")
+    originalMainClass: str | None = Field(default=None, min_length=1, max_length=200)
+
+    @field_validator("mainClass", "originalMainClass")
     @classmethod
     def class_name(cls, value: str | None) -> str | None:
         if value is not None and not all(
@@ -72,17 +76,33 @@ class CheckQueue:
         finally:
             db.close()
 
-    def enqueue(self, session: str, project: dict, request: CheckRequest, main_class: str) -> dict:
+    def enqueue(
+        self,
+        session: str,
+        project: dict,
+        request: CheckRequest,
+        main_class: str,
+        original_main: str | None = None,
+    ) -> dict:
         now = time.time()
         payload = {
             "sourceRevision": project["revision"],
             "filename": project["filename"],
             "mainClass": main_class,
+            "originalMainClass": original_main or main_class,
             "scenarios": [s.model_dump() for s in request.scenarios],
             "sourceOriginal": project["originalSource"],
             "sourceWorking": project["generatedSource"],
-            "originalHash": hashlib.sha256(project["originalSource"].encode()).hexdigest(),
-            "workingHash": hashlib.sha256(project["generatedSource"].encode()).hexdigest(),
+            "filesOriginal": sources(project, original=True),
+            "filesWorking": sources(project),
+            "originalHash": hashlib.sha256(
+                json.dumps(
+                    sources(project, original=True), sort_keys=True, ensure_ascii=False
+                ).encode()
+            ).hexdigest(),
+            "workingHash": hashlib.sha256(
+                json.dumps(sources(project), sort_keys=True, ensure_ascii=False).encode()
+            ).hexdigest(),
         }
         job_id = secrets.token_urlsafe(18)
         with self.connect() as db:
@@ -131,6 +151,7 @@ class CheckQueue:
             "phase": row["phase"],
             "queuePosition": position,
             "mainClass": payload["mainClass"],
+            "originalMainClass": payload.get("originalMainClass", payload["mainClass"]),
             "scenarios": payload["scenarios"],
             "originalHash": payload["originalHash"],
             "workingHash": payload["workingHash"],
@@ -188,6 +209,8 @@ class CheckQueue:
             payload = json.loads(row[0])
             payload.pop("sourceOriginal", None)
             payload.pop("sourceWorking", None)
+            payload.pop("filesOriginal", None)
+            payload.pop("filesWorking", None)
             status = "failed" if result["verdict"] == "inconclusive" else "completed"
             db.execute(
                 "UPDATE checks SET status=?,phase='finished',result=?,payload=?,updated=? "

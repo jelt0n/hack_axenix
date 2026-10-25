@@ -2,11 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import {
   ArrowDownToLine, ArrowRight, BookOpen, Box, Braces, Check, ChevronDown,
   ChevronRight, CircleHelp, FileCode2, FolderOpen, GitBranch, Layers3,
-  LoaderCircle, PanelLeftClose, Play, Upload, X,
+  LoaderCircle, PanelLeftClose, Play, Upload, X, Terminal,
 } from 'lucide-react';
 import { api, ApiError } from './api';
 import { exampleSource } from './example';
 import MethodGraph from './MethodGraph';
+import FileExplorer from './FileExplorer';
 import SourceView from './SourceView';
 import CheckPanel from './CheckPanel';
 import AnalysisPanel from './AnalysisPanel';
@@ -54,8 +55,9 @@ export default function App() {
   function openProject(next: Project) {
     analysisTarget.current = null;
     setAutomaticCheck(null);
+    sessionStorage.setItem(`file:${next.id}`, next.fileId);
     setProject(next);
-    const remembered = sessionStorage.getItem(`method:${next.id}`);
+    const remembered = sessionStorage.getItem(`method:${next.id}:${next.fileId}`);
     setMethodId(next.methods.find(item => item.id === remembered)?.id
       ?? next.methods.find(item => item.hasBody)?.id ?? next.methods[0]?.id ?? null);
     setSelection(null);
@@ -65,7 +67,11 @@ export default function App() {
 
   useEffect(() => {
     let active = true;
-    api.current().then(next => { if (active) openProject(next); }).catch(() => {})
+    api.current().then(async next => {
+      const fileId = sessionStorage.getItem(`file:${next.id}`);
+      const restored = fileId && next.files.some(file => file.id === fileId) ? await api.project(next.id, fileId) : next;
+      if (active) openProject(restored);
+    }).catch(() => {})
       .finally(() => { if (active) setRestoring(false); });
     return () => { active = false; };
   }, []);
@@ -76,10 +82,10 @@ export default function App() {
     setGraphLoading(true);
     setGraph(null);
     setSelection(null);
-    sessionStorage.setItem(`method:${project.id}`, methodId);
-    api.graph(project.id, methodId).then(next => {
+    sessionStorage.setItem(`method:${project.id}:${project.fileId}`, methodId);
+    api.graph(project.id, methodId, project.fileId).then(next => {
       const current = projectRef.current;
-      if (!active || current?.id !== project.id) return;
+      if (!active || current?.id !== project.id || current?.fileId !== project.fileId) return;
       if (next.projectRevision >= current.revision) {
         setRemoteChanged(next.projectRevision !== current.revision || next.sourceRevision !== current.graphRevision);
       }
@@ -97,7 +103,7 @@ export default function App() {
         if (!active) return;
         if (reason instanceof ApiError && reason.status === 404) {
           try {
-            const remote = await api.project(project.id);
+            const remote = await api.project(project.id, project.fileId);
             if (!active) return;
             if (remote.revision !== projectRef.current?.revision) { setRemoteChanged(true); return; }
           } catch { /* The original request error describes an expired or unavailable project. */ }
@@ -106,7 +112,7 @@ export default function App() {
       })
       .finally(() => { if (active) setGraphLoading(false); });
     return () => { active = false; };
-  }, [project?.id, project?.graphRevision, methodId]);
+  }, [project?.id, project?.fileId, project?.graphRevision, methodId]);
 
   async function importSource(filename: string, source: string) {
     setBusy(true); setError(null);
@@ -145,9 +151,25 @@ export default function App() {
     const anchor = document.createElement('a');
     const url = URL.createObjectURL(new Blob([editor.source], { type: 'text/plain;charset=utf-8' }));
     anchor.href = url;
-    anchor.download = project.filename;
+    anchor.download = project.filename.split('/').pop()!;
     anchor.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  async function selectFile(fileId: string) {
+    if (!project || editor.saving) return;
+    setBusy(true); setError(null);
+    try { openProject(await api.project(project.id, fileId)); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : 'Не удалось открыть файл'); }
+    finally { setBusy(false); }
+  }
+  function changeFiles(next: Project) {
+    for (const removed of project?.files.filter(file => !next.files.some(item => item.id === file.id)) ?? []) {
+      sessionStorage.removeItem(`java-draft:${next.id}:${removed.id}`);
+      if (removed.id.startsWith("file-")) sessionStorage.removeItem(`java-draft:${next.id}`);
+    }
+    if (next.fileId === project?.fileId) editor.acceptFileChange(next);
+    else openProject(next);
   }
 
   const groups = new Map<string, JavaMethod[]>();
@@ -170,7 +192,7 @@ export default function App() {
           <div className="sidebar-title">ОБОЗРЕВАТЕЛЬ <Layers3 size={14} /></div>
           <div className="project-folder"><ChevronDown size={14} /><FolderOpen size={16} />{project ? 'java-project' : 'Новый проект'}</div>
           {project ? <>
-            <div className="file-row"><FileCode2 size={15} /><span>{project.filename}</span><span className="file-badge">J</span></div>
+            <FileExplorer project={project} pendingChanges={editor.pendingFiles || editor.dirty} disabled={busy || editor.saving} onSelect={selectFile} onChange={changeFiles} />
             <div className="methods-label">МЕТОДЫ <span>{project.methods.length}</span></div>
             <nav className="methods" aria-label="Методы программы">{[...groups].map(([owner, methods]) => <div key={owner}>
               <div className="class-label"><Box size={12} />{owner || 'Без класса'}</div>
@@ -193,10 +215,11 @@ export default function App() {
             <div className="toolbar-actions"><button className="button secondary" onClick={() => input.current?.click()} disabled={busy}>
               {busy ? <LoaderCircle size={15} className="spin" /> : <Upload size={15} />}Импорт Java</button>
               <button className="button secondary" aria-label="Экспорт Java" onClick={exportSource} disabled={!project || busy}><ArrowDownToLine size={15} />Экспорт Java</button>
+              {project && <button className="button secondary" aria-label="Открыть консоль" onClick={() => setChecksOpen(true)}><Terminal size={15} />Консоль</button>}
               {project && <button className="button primary" aria-label="Проверить поведение" onClick={() => setChecksOpen(true)}><Play size={14} />Проверить</button>}</div>
           </div>
 
-          {error && <div className="error-banner" role="alert"><span><strong>Не удалось загрузить файл.</strong> {error}</span>
+          {error && <div className="error-banner" role="alert"><span><strong>Не удалось выполнить действие.</strong> {error}</span>
             <button className="icon-button" aria-label="Закрыть ошибку" onClick={() => setError(null)}><X size={16} /></button></div>}
 
           {restoring ? <div className="welcome"><span className="spinner" /><p>Восстанавливаем рабочее пространство…</p></div>
@@ -227,22 +250,22 @@ export default function App() {
               {!editor.dirty && project.diagnostics.length > 0 && <div className="edit-diagnostics" role="alert"><strong>Java содержит синтаксические ошибки. Код сохранён, показан предыдущий граф.</strong>
                 {project.diagnostics.map((item, index) => <div key={index}>Строка {item.line}, столбец {item.column}: {item.message}</div>)}</div>}
               <div className={`editor-workspace ${graphOnly ? 'graph-only' : ''}`}>
-                {!graphOnly && <SourceView key={project.id} project={project} method={method} selection={selection?.range ?? null} blocks={graphStale ? [] : graph?.nodes ?? []}
+                {!graphOnly && <SourceView key={`${project.id}:${project.fileId}`} project={project} method={method} selection={selection?.range ?? null} blocks={graphStale ? [] : graph?.nodes ?? []}
                   onSelect={setSelection} original={original} onOriginal={setOriginal} value={editor.source} onChange={editor.changeSource} stale={graphStale} dirty={editor.dirty} />}
                 <MethodGraph graph={graph} method={method} selected={selection?.id ?? null} onSelect={setSelection} loading={graphLoading} stale={graphStale}
                   editDisabled={editor.saving || !!editor.conflict || original} onEdit={editor.editGraph} />
               </div>
               <div className="workspace-note"><span><i />{project.methods.length} методов · ревизия {project.revision}</span>
                 <span>Исходная версия сохранена <Check size={12} /></span></div>
-              <ConstantBranchPanel key={`constant:${project.id}`} project={project} graph={graph} selected={selection}
+              <ConstantBranchPanel key={`constant:${project.id}:${project.fileId}`} project={project} graph={graph} selected={selection}
                 disabled={graphStale || editor.saving || original || graphLoading}
                 onApply={applyTransformation} onConflict={() => setRemoteChanged(true)} />
-              <ExtractMethodPanel key={`extract:${project.id}`} project={project} graph={graph} selected={selection}
+              <ExtractMethodPanel key={`extract:${project.id}:${project.fileId}`} project={project} graph={graph} selected={selection}
                 disabled={graphStale || editor.saving || original || graphLoading}
                 onApply={applyTransformation} onConflict={() => setRemoteChanged(true)} />
-              <AnalysisPanel key={`analysis:${project.id}`} project={project} pendingChanges={graphStale || editor.saving}
+              <AnalysisPanel key={`AnalysisPanel:${project.id}:${project.fileId}`} project={project} pendingChanges={graphStale || editor.saving || editor.pendingFiles}
                 onNavigate={navigateFinding} onConflict={() => setRemoteChanged(true)} />
-              <CheckPanel project={project} open={checksOpen} onToggle={() => setChecksOpen(!checksOpen)} pendingChanges={remoteChanged || !!editor.conflict || editor.dirty || editor.saving} automaticCheck={automaticCheck} />
+              <CheckPanel project={project} open={checksOpen} onToggle={() => setChecksOpen(!checksOpen)} pendingChanges={remoteChanged || !!editor.conflict || editor.dirty || editor.saving || editor.pendingFiles} automaticCheck={automaticCheck} />
             </>}
           <footer className="app-footer"><span><GitBranch size={13} />Java ↔ граф</span><span>Исследуйте код. Сохраняйте смысл.</span><span>AXENIX HACKATHON <i>2026</i></span></footer>
         </main>

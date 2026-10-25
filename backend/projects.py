@@ -6,6 +6,15 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
+from backend.workspace import (
+    FILE_KEYS,
+    InvalidWorkspace,
+    entry_points,
+    select_file,
+    sync_file,
+    validate_workspace,
+)
+
 
 class RevisionConflict(Exception):
     pass
@@ -19,14 +28,16 @@ class ProjectCapacityExceeded(Exception):
     pass
 
 
-def editor_state(project: dict) -> dict:
+def editor_state(project: dict, file_id: str | None = None) -> dict:
     """Load older imported projects without changing their sources or model."""
+    if "files" in project:
+        return select_file(project, file_id)
     project.setdefault("graphRevision", project["revision"])
     project.setdefault("modelSource", project["generatedSource"])
     project.setdefault("originalMethods", project["methods"])
     project.setdefault("originalPackageName", project["packageName"])
     project.setdefault("diagnostics", [])
-    return project
+    return select_file(project, file_id)
 
 
 class ProjectStore:
@@ -71,6 +82,7 @@ class ProjectStore:
             "originalPackageName": parsed["packageName"],
             "diagnostics": [],
         }
+        project = editor_state(project)
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             db.execute("DELETE FROM projects WHERE created < ?", (time.time() - 24 * 3600,))
@@ -85,7 +97,10 @@ class ProjectStore:
         return project
 
     def _payload_within_capacity(self, db: sqlite3.Connection, project: dict) -> str:
-        payload = json.dumps(project, ensure_ascii=False)
+        payload = json.dumps(
+            {key: value for key, value in project.items() if key not in FILE_KEYS},
+            ensure_ascii=False,
+        )
         occupied = db.execute(
             "SELECT COALESCE(SUM(length(CAST(payload AS BLOB))), 0) FROM projects WHERE id != ?",
             (project["id"],),
@@ -97,7 +112,9 @@ class ProjectStore:
             )
         return payload
 
-    def get(self, session: str, project_id: str | None = None) -> dict | None:
+    def get(
+        self, session: str, project_id: str | None = None, file_id: str | None = None
+    ) -> dict | None:
         with self.connect() as db:
             if project_id is None:
                 row = db.execute(
@@ -110,9 +127,11 @@ class ProjectStore:
                     "SELECT payload FROM projects WHERE id = ? AND session = ? AND created > ?",
                     (project_id, session, time.time() - 24 * 3600),
                 ).fetchone()
-        return editor_state(json.loads(row[0])) if row else None
+        return editor_state(json.loads(row[0]), file_id) if row else None
 
-    def _update(self, session: str, project_id: str, revision: int, change) -> dict:
+    def _update(
+        self, session: str, project_id: str, revision: int, change, file_id: str | None = None
+    ) -> dict:
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute(
@@ -121,10 +140,13 @@ class ProjectStore:
             ).fetchone()
             if row is None:
                 raise ProjectNotFound
-            project = editor_state(json.loads(row[0]))
+            project = editor_state(json.loads(row[0]), file_id)
             if project["revision"] != revision:
                 raise RevisionConflict
             change(project)
+            sync_file(project)
+            validate_workspace(project)
+            select_file(project, project["fileId"])
             db.execute("DELETE FROM projects WHERE created < ?", (time.time() - 86400,))
             db.execute(
                 "UPDATE projects SET payload=? WHERE id=?",
@@ -132,16 +154,20 @@ class ProjectStore:
             )
         return project
 
-    def save_source(self, session: str, project_id: str, revision: int, source: str) -> dict:
+    def save_source(
+        self, session: str, project_id: str, revision: int, source: str, file_id: str | None = None
+    ) -> dict:
         def change(project):
             if project["generatedSource"] != source:
                 project["generatedSource"] = source
                 project["revision"] += 1
                 project["diagnostics"] = []
 
-        return self._update(session, project_id, revision, change)
+        return self._update(session, project_id, revision, change, file_id)
 
-    def rebuild(self, session: str, project_id: str, revision: int, parsed: dict) -> dict:
+    def rebuild(
+        self, session: str, project_id: str, revision: int, parsed: dict, file_id: str | None = None
+    ) -> dict:
         def change(project):
             project["diagnostics"] = parsed.get("errors", [])
             if parsed["ok"]:
@@ -153,9 +179,11 @@ class ProjectStore:
                     modelSource=project["generatedSource"],
                 )
 
-        return self._update(session, project_id, revision, change)
+        return self._update(session, project_id, revision, change, file_id)
 
-    def apply_graph_edit(self, session: str, project_id: str, revision: int, parsed: dict) -> dict:
+    def apply_graph_edit(
+        self, session: str, project_id: str, revision: int, parsed: dict, file_id: str | None = None
+    ) -> dict:
         def change(project):
             if project["graphRevision"] != revision:
                 raise RevisionConflict
@@ -171,8 +199,70 @@ class ProjectStore:
                 diagnostics=[],
             )
 
+        return self._update(session, project_id, revision, change, file_id)
+
+    def add_file(
+        self, session: str, project_id: str, revision: int, path: str, source: str, parsed: dict
+    ) -> dict:
+        def change(project):
+            file = {
+                "id": secrets.token_urlsafe(12),
+                "filename": path,
+                "originalPath": None,
+                "originalSource": "",
+                "generatedSource": source,
+                "packageName": parsed["packageName"],
+                "methods": parsed["methods"],
+                "graphs": parsed["graphs"],
+                "graphRevision": project["revision"] + 1,
+                "modelSource": source,
+                "originalMethods": [],
+                "originalPackageName": "",
+                "diagnostics": [],
+                "deleted": False,
+            }
+            project["files"].append(file)
+            project["revision"] += 1
+            select_file(project, file["id"])
+
         return self._update(session, project_id, revision, change)
+
+    def rename_file(
+        self, session: str, project_id: str, revision: int, file_id: str, path: str
+    ) -> dict:
+        def change(project):
+            if project["filename"] != path:
+                project["filename"] = path
+                project["revision"] += 1
+
+        return self._update(session, project_id, revision, change, file_id)
+
+    def delete_file(self, session: str, project_id: str, revision: int, file_id: str) -> dict:
+        def change(project):
+            file = next(f for f in project["files"] if f["id"] == file_id)
+            if sum(not f["deleted"] for f in project["files"]) <= 1:
+                raise InvalidWorkspace("Нельзя удалить последний файл проекта.")
+            file["deleted"] = True
+            if file["originalPath"] is None:
+                project["files"].remove(file)
+            project["revision"] += 1
+            select_file(project)
+
+        return self._update(session, project_id, revision, change, file_id)
 
 
 def summary(project: dict) -> dict:
-    return {key: value for key, value in project.items() if key != "graphs"}
+    result = {key: value for key, value in project.items() if key not in ("graphs", "files")}
+    result["files"] = [
+        {
+            "id": f["id"],
+            "path": f["filename"],
+            "originalPath": f["originalPath"],
+            "stale": f["generatedSource"] != f["modelSource"],
+        }
+        for f in project["files"]
+        if not f["deleted"]
+    ]
+    result["entryPoints"] = entry_points(project)
+    result["originalEntryPoints"] = entry_points(project, original=True)
+    return result

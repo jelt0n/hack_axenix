@@ -1,6 +1,8 @@
 import hashlib
+import io
 import os
 import secrets
+import zipfile
 from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import quote
@@ -19,6 +21,7 @@ from backend.projects import (
     RevisionConflict,
     summary,
 )
+from backend.workspace import FileNotFound, InvalidWorkspace, entry_points, java_path, sources
 
 ROOT = Path(__file__).resolve().parents[1]
 COOKIE = "blueprints_session"
@@ -51,6 +54,11 @@ class ImportProject(BaseModel):
 class RevisionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     revision: int = Field(ge=1)
+
+
+class FileRequest(RevisionRequest):
+    path: Annotated[str, AfterValidator(java_path)] = Field(max_length=240)
+    source: SourceText = Field(default="", max_length=256_000)
 
 
 class SourceRequest(RevisionRequest):
@@ -92,6 +100,14 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     store = ProjectStore(directory)
     checks = CheckQueue(directory)
 
+    @app.exception_handler(InvalidWorkspace)
+    async def invalid_workspace(request: Request, exc: InvalidWorkspace):
+        return JSONResponse({"detail": str(exc)}, 422)
+
+    @app.exception_handler(FileNotFound)
+    async def file_not_found(request: Request, exc: FileNotFound):
+        return JSONResponse({"detail": str(exc)}, 404)
+
     @app.exception_handler(RevisionConflict)
     async def revision_conflict(request: Request, exc: RevisionConflict):
         return JSONResponse(
@@ -109,7 +125,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
 
     @app.middleware("http")
     async def limit_request(request: Request, call_next):
-        if request.method == "POST" and request.url.path.startswith("/api/"):
+        if request.method in ("POST", "PATCH", "PUT") and request.url.path.startswith("/api/"):
             body = bytearray()
             async for chunk in request.stream():
                 body.extend(chunk)
@@ -120,7 +136,9 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         return await call_next(request)
 
     def owned(request: Request, project_id: str | None = None) -> dict:
-        project = store.get(request.cookies.get(COOKIE, ""), project_id)
+        project = store.get(
+            request.cookies.get(COOKIE, ""), project_id, request.query_params.get("fileId")
+        )
         if project is None:
             raise HTTPException(404, "Проект не найден или срок хранения истёк")
         return project
@@ -138,20 +156,26 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         project = owned(request, project_id)
         if payload.revision != project["revision"]:
             raise HTTPException(409, "Версия проекта изменилась. Обновите проект перед проверкой.")
-        candidates = sorted(
-            {
-                ((project["packageName"] + ".") if project["packageName"] else "")
-                + method["owner"].replace(".", "$")
-                for method in project["methods"]
-                if method["name"] == "main" and method["hasBody"]
-            }
-        )
+        candidates = entry_points(project)
         main_class = payload.mainClass or (candidates[0] if len(candidates) == 1 else None)
         if main_class is None:
             raise HTTPException(422, "Укажите класс с public static void main(String[] args)")
+        original_candidates = entry_points(project, original=True)
+        original_main = payload.originalMainClass or (
+            main_class
+            if main_class in original_candidates
+            else original_candidates[0]
+            if len(original_candidates) == 1
+            else None
+        )
+        if original_main is None:
+            raise HTTPException(422, "Укажите класс с main исходной версии.")
         try:
+            CheckRequest.class_name(original_main)
             CheckRequest.class_name(main_class)
-            return checks.enqueue(request.cookies.get(COOKIE, ""), project, payload, main_class)
+            return checks.enqueue(
+                request.cookies.get(COOKIE, ""), project, payload, main_class, original_main
+            )
         except QueueFull as exc:
             raise HTTPException(429, str(exc)) from exc
         except ValueError as exc:
@@ -205,7 +229,11 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     @app.post("/api/projects/{project_id}/source")
     def save_source(project_id: str, payload: SourceRequest, request: Request):
         project = store.save_source(
-            request.cookies.get(COOKIE, ""), project_id, payload.revision, payload.source
+            request.cookies.get(COOKIE, ""),
+            project_id,
+            payload.revision,
+            payload.source,
+            request.query_params.get("fileId"),
         )
         return summary(project)
 
@@ -219,7 +247,13 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         except ParserUnavailable as exc:
             raise HTTPException(503, str(exc)) from exc
         return summary(
-            store.rebuild(request.cookies.get(COOKIE, ""), project_id, payload.revision, parsed)
+            store.rebuild(
+                request.cookies.get(COOKIE, ""),
+                project_id,
+                payload.revision,
+                parsed,
+                request.query_params.get("fileId"),
+            )
         )
 
     @app.post("/api/projects/{project_id}/analysis")
@@ -269,7 +303,9 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             raise HTTPException(422, "После преобразования исходник превышает 256 КБ UTF-8")
         if owned(request, project_id)["revision"] != payload.revision:
             raise RevisionConflict
-        digest = hashlib.sha256(parsed["generatedSource"].encode("utf-8")).hexdigest()
+        digest = hashlib.sha256(
+            (project["fileId"] + ":" + parsed["generatedSource"]).encode("utf-8")
+        ).hexdigest()
         return parsed, digest
 
     @app.post("/api/projects/{project_id}/transformations/constant-branch/preview")
@@ -286,6 +322,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         )
         return {
             "projectId": project_id,
+            "fileId": owned(request, project_id)["fileId"],
             "sourceRevision": payload.revision,
             "methodId": payload.methodId,
             "nodeId": payload.nodeId,
@@ -311,7 +348,11 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             )
         return summary(
             store.apply_graph_edit(
-                request.cookies.get(COOKIE, ""), project_id, payload.revision, parsed
+                request.cookies.get(COOKIE, ""),
+                project_id,
+                payload.revision,
+                parsed,
+                request.query_params.get("fileId"),
             )
         )
 
@@ -328,6 +369,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         )
         return {
             "projectId": project_id,
+            "fileId": owned(request, project_id)["fileId"],
             "sourceRevision": payload.revision,
             **payload.model_dump(exclude={"revision"}),
             "previewHash": digest,
@@ -349,7 +391,11 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             raise HTTPException(409, "Предпросмотр изменился. Подготовьте выделение метода заново.")
         return summary(
             store.apply_graph_edit(
-                request.cookies.get(COOKIE, ""), project_id, payload.revision, parsed
+                request.cookies.get(COOKIE, ""),
+                project_id,
+                payload.revision,
+                parsed,
+                request.query_params.get("fileId"),
             )
         )
 
@@ -373,8 +419,61 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             raise HTTPException(422, "После правки исходник превышает 256 КБ UTF-8")
         return summary(
             store.apply_graph_edit(
-                request.cookies.get(COOKIE, ""), project_id, payload.revision, parsed
+                request.cookies.get(COOKIE, ""),
+                project_id,
+                payload.revision,
+                parsed,
+                request.query_params.get("fileId"),
             )
+        )
+
+    @app.post("/api/projects/{project_id}/files", status_code=201)
+    def add_file(project_id: str, payload: FileRequest, request: Request):
+        owned(request, project_id)
+        try:
+            parsed = parse_java(payload.source)
+        except ParserUnavailable as exc:
+            raise HTTPException(503, str(exc)) from exc
+        if not parsed["ok"]:
+            raise HTTPException(
+                422, {"message": "Исправьте синтаксис нового файла", "errors": parsed["errors"]}
+            )
+        return summary(
+            store.add_file(
+                request.cookies.get(COOKIE, ""),
+                project_id,
+                payload.revision,
+                payload.path,
+                payload.source,
+                parsed,
+            )
+        )
+
+    @app.patch("/api/projects/{project_id}/files/{file_id}")
+    def rename_file(project_id: str, file_id: str, payload: FileRequest, request: Request):
+        return summary(
+            store.rename_file(
+                request.cookies.get(COOKIE, ""), project_id, payload.revision, file_id, payload.path
+            )
+        )
+
+    @app.delete("/api/projects/{project_id}/files/{file_id}")
+    def delete_file(project_id: str, file_id: str, revision: int, request: Request):
+        return summary(
+            store.delete_file(request.cookies.get(COOKIE, ""), project_id, revision, file_id)
+        )
+
+    @app.get("/api/projects/{project_id}/export.zip")
+    def export_workspace(project_id: str, request: Request):
+        project = owned(request, project_id)
+        output = io.BytesIO()
+        with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+            for path, source in sources(project).items():
+                archive.writestr(path, source.encode("utf-8"))
+        return Response(
+            output.getvalue(),
+            media_type="application/zip",
+            headers={"Content-Disposition": 'attachment; filename="java-project.zip"'},
         )
 
     @app.get("/api/projects/{project_id}/export")

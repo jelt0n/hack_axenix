@@ -8,6 +8,7 @@ export type JavaMethod = {
 };
 
 export type Project = {
+  fileId: string; files: { id: string; path: string; originalPath: string | null; stale: boolean }[]; entryPoints: string[]; originalEntryPoints: string[];
   id: string; filename: string; revision: number; originalSource: string;
   generatedSource: string; packageName: string; methods: JavaMethod[];
   graphRevision: number; modelSource: string; originalMethods: JavaMethod[];
@@ -46,7 +47,7 @@ export type ProgramResult = {
 export type CheckJob = {
   id: string; projectId: string; sourceRevision: number; createdAt: number;
   status: 'queued' | 'running' | 'completed' | 'failed'; phase: string;
-  queuePosition: number | null; mainClass: string; scenarios: Scenario[];
+  queuePosition: number | null; mainClass: string; originalMainClass: string; scenarios: Scenario[];
   result: {
     verdict: 'matched' | 'different' | 'inconclusive';
     cases: { name: string; stdin: string; original: ProgramResult | null;
@@ -67,6 +68,7 @@ export type AnalysisReport = {
 };
 
 export type BranchPreview = {
+  fileId: string;
   projectId: string; sourceRevision: number; methodId: string; nodeId: string;
   previewHash: string; before: string; after: string; range: SourceRange;
 };

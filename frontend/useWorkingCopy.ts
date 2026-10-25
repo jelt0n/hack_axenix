@@ -3,11 +3,11 @@ import { api, ApiError } from './api';
 import type { ExtractionPreview, BranchPreview, GraphEdit, Project } from './types';
 
 type Draft = { id: string; source: string; baseRevision: number };
-const key = (id: string) => `java-draft:${id}`;
+const key = (id: string, fileId: string) => `java-draft:${id}:${fileId}`;
 
 function recover(project: Project): Draft {
   try {
-    const saved = JSON.parse(sessionStorage.getItem(key(project.id)) || 'null');
+    const saved = JSON.parse(sessionStorage.getItem(key(project.id, project.fileId)) || (project.fileId.startsWith('file-') ? sessionStorage.getItem(`java-draft:${project.id}`) : null) || 'null');
     if (saved && typeof saved.source === 'string' && Number.isInteger(saved.baseRevision)) {
       return { id: project.id, source: saved.source, baseRevision: saved.baseRevision };
     }
@@ -34,12 +34,13 @@ export default function useWorkingCopy(project: Project | null, onUpdate: (next:
     if (next.source === project.generatedSource) next.baseRevision = project.revision;
     else if (next.baseRevision !== project.revision) setConflict(project);
     setDraft(next);
-  }, [project?.id]);
+  }, [project?.id, project?.fileId]);
 
   function remember(next: Draft, savedSource?: string) {
     try {
-      if (next.source === savedSource) sessionStorage.removeItem(key(next.id));
-      else sessionStorage.setItem(key(next.id), JSON.stringify(next));
+      if (next.source === savedSource) sessionStorage.removeItem(key(next.id, current.current.project!.fileId));
+      else sessionStorage.setItem(key(next.id, current.current.project!.fileId), JSON.stringify(next));
+      if (current.current.project!.fileId.startsWith('file-')) sessionStorage.removeItem(`java-draft:${next.id}`);
       setLocalSaved(true);
     } catch {
       setLocalSaved(false);
@@ -57,9 +58,10 @@ export default function useWorkingCopy(project: Project | null, onUpdate: (next:
   }
 
   function beginOperation(id: string) {
+    const fileId = current.current.project?.fileId;
     const token = Symbol(); operation.current = token;
     setSaving(true); setError(null);
-    return () => operation.current === token && current.current.project?.id === id;
+    return () => operation.current === token && current.current.project?.id === id && current.current.project?.fileId === fileId;
   }
 
   function finishOperation(active: () => boolean) {
@@ -70,7 +72,7 @@ export default function useWorkingCopy(project: Project | null, onUpdate: (next:
     if (!active()) return;
     if (reason instanceof ApiError && reason.status === 409) {
       try {
-        const remote = await api.project(id);
+        const remote = await api.project(id, current.current.project?.fileId);
         if (active()) setConflict(remote);
       } catch { /* Keep the local text and the original conflict message. */ }
     }
@@ -84,13 +86,13 @@ export default function useWorkingCopy(project: Project | null, onUpdate: (next:
     const snapshot = state.draft ?? { id, source: state.project.generatedSource, baseRevision: state.project.revision };
     const active = beginOperation(id);
     try {
-      const saved = await api.saveSource(id, overwrite?.revision ?? snapshot.baseRevision, snapshot.source);
+      const saved = await api.saveSource(id, overwrite?.revision ?? snapshot.baseRevision, snapshot.source, state.project.fileId);
       if (!active()) return;
       const latest = { ...(current.current.draft ?? snapshot), baseRevision: saved.revision };
       current.current = { ...current.current, project: saved, draft: latest };
       setDraft(latest); setConflict(null); remember(latest, saved.generatedSource);
       current.current.onUpdate(saved);
-      const rebuilt = await api.rebuild(id, saved.revision);
+      const rebuilt = await api.rebuild(id, saved.revision, saved.fileId);
       if (active()) current.current.onUpdate(rebuilt);
     } catch (reason) {
       await showFailure(id, active, reason, 'Не удалось обновить граф');
@@ -137,16 +139,27 @@ export default function useWorkingCopy(project: Project | null, onUpdate: (next:
   }
 
   async function editGraph(edit: GraphEdit) {
-    await applySourceChange(current => api.editGraph(current.id, current.revision, edit));
+    await applySourceChange(current => api.editGraph(current.id, current.revision, edit, current.fileId));
   }
 
   async function applyTransformation(preview: BranchPreview | ExtractionPreview) {
     if (current.current.project?.id !== preview.projectId
-        || current.current.project?.revision !== preview.sourceRevision) return;
+        || current.current.project?.revision !== preview.sourceRevision || current.current.project?.fileId !== preview.fileId) return;
     return applySourceChange(() => 'nodeId' in preview ? api.applyBranch(preview) : api.applyExtraction(preview));
   }
 
+  function acceptFileChange(next: Project) {
+    const state = current.current;
+    const updated = { id: next.id, source: state.draft?.source ?? next.generatedSource, baseRevision: next.revision };
+    current.current = { ...state, project: next, draft: updated };
+    setDraft(updated); remember(updated, next.generatedSource); state.onUpdate(next);
+  }
+
+  let pendingFiles = false;
+  try {
+    pendingFiles = !!project && Object.keys(sessionStorage).some(item => (item.startsWith(`java-draft:${project.id}:`) || item === `java-draft:${project.id}`));
+  } catch { /* Current draft is still tracked in React state. */ }
   const source = draft?.id === project?.id ? draft?.source ?? '' : project?.generatedSource ?? '';
   const dirty = !!project && source !== project.generatedSource;
-  return { source, dirty, saving, localSaved, error, conflict, changeSource, rebuild, useServerCopy, editGraph, applyTransformation };
+  return { source, dirty, pendingFiles, acceptFileChange, saving, localSaved, error, conflict, changeSource, rebuild, useServerCopy, editGraph, applyTransformation };
 }

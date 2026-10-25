@@ -2,13 +2,16 @@
 
 import hashlib
 import hmac
+import io
 import json
 import os
 import selectors
 import subprocess
+import tarfile
 import time
 import uuid
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 
 IMAGE = "java-blueprints-runner:dev"
 OUTPUT_LIMIT = 65_536
@@ -178,9 +181,39 @@ class DockerExecutor:
         for container_id in ids:
             self.control(["rm", "-f", container_id])
 
-    def run(self, filename: str, source: str, main_class: str, stdin: str) -> ProgramResult:
-        if "/" in filename or "\\" in filename or len(source.encode()) > 512_000:
-            raise RunnerError("Некорректный снимок исходника")
+    def run(
+        self,
+        filename: str,
+        source: str,
+        main_class: str,
+        stdin: str,
+        *,
+        files: dict[str, str] | None = None,
+    ) -> ProgramResult:
+        files = files if files is not None else {filename: source}
+        if (
+            not files
+            or len(files) > 32
+            or sum(len(s.encode("utf-8")) for s in files.values()) > 1024 * 1024
+        ):
+            raise RunnerError("Некорректный размер снимка проекта")
+        for path in files:
+            if (
+                not path.endswith(".java")
+                or path.startswith("/")
+                or "\\" in path
+                or any(p in ("", ".", "..") for p in path.split("/"))
+                or "\0" in path
+            ):
+                raise RunnerError("Некорректный путь снимка исходника")
+        archive = io.BytesIO()
+        with tarfile.open(fileobj=archive, mode="w") as bundle:
+            for path, content in files.items():
+                encoded = content.encode("utf-8")
+                member = tarfile.TarInfo(path)
+                member.size = len(encoded)
+                member.mode = 0o600
+                bundle.addfile(member, io.BytesIO(encoded))
         name = "blueprints-" + uuid.uuid4().hex
         created = False
         try:
@@ -213,8 +246,8 @@ class DockerExecutor:
             created = True
             self.control(["start", name])
             self.control(
-                ["exec", "-i", name, "/bin/sh", "-c", 'cat > "$1"', "--", f"/work/{filename}"],
-                stdin=source.encode("utf-8"),
+                ["exec", "-i", name, "tar", "-xf", "-", "-C", "/work"],
+                stdin=archive.getvalue(),
             )
             compiled = bounded_process(
                 [
@@ -230,7 +263,7 @@ class DockerExecutor:
                     "UTF-8",
                     "-d",
                     "/work/classes",
-                    f"/work/{filename}",
+                    *[str(PurePosixPath("/work") / path) for path in files],
                 ],
                 timeout=COMPILE_TIMEOUT,
             )
@@ -350,7 +383,13 @@ def check_snapshot(executor: DockerExecutor, snapshot: dict, progress) -> dict:
         for version, key in (("original", "sourceOriginal"), ("working", "sourceWorking")):
             progress(f"{version}:{index + 1}")
             result = executor.run(
-                snapshot["filename"], snapshot[key], snapshot["mainClass"], scenario["stdin"]
+                snapshot["filename"],
+                snapshot[key],
+                snapshot.get("originalMainClass", snapshot["mainClass"])
+                if version == "original"
+                else snapshot["mainClass"],
+                scenario["stdin"],
+                files=snapshot.get("filesOriginal" if version == "original" else "filesWorking"),
             )
             case[version] = result.public()
             if result.status != "finished":

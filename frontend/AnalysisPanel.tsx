@@ -23,7 +23,7 @@ export default function AnalysisPanel({ project, pendingChanges, onNavigate, onC
     const key = current.current;
     setBusy(true); setError('');
     try {
-      const next = await api.analyze(project.id, project.revision);
+      const next = await api.analyze(project.id, project.revision, project.fileId);
       if (current.current === key) setReport(next);
     } catch (reason) {
       if (current.current === key) {

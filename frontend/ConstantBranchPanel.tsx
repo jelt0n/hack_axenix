@@ -16,7 +16,7 @@ export default function ConstantBranchPanel({ project, graph, selected, disabled
     <div className="analysis-heading"><div><strong>Упрощение константной ветки</strong>
       <p>Выберите условие if с буквальным true или false. Сначала покажем изменение.</p></div>
       <button className="button secondary" disabled={disabled || busy || !selection?.constantBranch}
-        onClick={() => void prepare(() => api.previewBranch(project.id,project.revision,graph!.methodId,selection!.id))}>{busy ? 'Готовим…' : 'Предпросмотр упрощения'}</button></div>
+        onClick={() => void prepare(() => api.previewBranch(project.id,project.revision,graph!.methodId,selection!.id,project.fileId))}>{busy ? 'Готовим…' : 'Предпросмотр упрощения'}</button></div>
     {error && <p role="alert">{error}</p>}
     {preview && valid && !disabled && <div role="dialog" aria-label="Предпросмотр упрощения" className="branch-preview">
       <p>Выбранная ветка сохранится в отдельном блоке. После подтверждения запустится проверка на сценариях из раздела «Проверка поведения».</p>
