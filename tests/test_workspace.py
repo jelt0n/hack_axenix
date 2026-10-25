@@ -92,3 +92,65 @@ def test_selected_file_edits_do_not_touch_siblings_and_are_private(tmp_path):
         assert any(n["code"] == "return 6;" for n in graph["nodes"])
         assert client.delete(url + "/files/" + project["fileId"] + "?revision=3").status_code == 200
         assert client.delete(url + "/files/" + file_id + "?revision=4").status_code == 422
+
+
+def test_project_utf8_budget_rejects_a_file_without_partial_creation(tmp_path):
+    source = "class C {} //" + "ж" * 115000
+    with TestClient(create_app(tmp_path)) as client:
+        project = client.post("/api/projects", json={"filename": "C.java", "source": source}).json()
+        url = f"/api/projects/{project['id']}"
+        for revision, name in [(1, "D.java"), (2, "E.java"), (3, "F.java")]:
+            response = client.post(
+                url + "/files", json={"revision": revision, "path": name, "source": source}
+            )
+            assert response.status_code == 201, response.text
+        rejected = client.post(
+            url + "/files", json={"revision": 4, "path": "G.java", "source": source}
+        )
+        assert rejected.status_code == 422, rejected.text
+        current = client.get(url).json()
+        assert current["revision"] == 4
+        assert [f["path"] for f in current["files"]] == ["C.java", "D.java", "E.java", "F.java"]
+
+
+def test_pre_workspace_project_is_readable_and_file_identity_survives_restart(tmp_path):
+    import json
+    import sqlite3
+    import time
+
+    create_app(tmp_path)
+    source = "class Legacy {}"
+    legacy = {
+        "id": "legacy-project",
+        "filename": "Legacy.java",
+        "revision": 1,
+        "originalSource": source,
+        "generatedSource": source,
+        "packageName": "",
+        "methods": [],
+        "graphs": {},
+    }
+    with sqlite3.connect(tmp_path / "projects.sqlite3") as db:
+        db.execute(
+            "INSERT INTO projects VALUES (?, ?, ?, ?)",
+            ("legacy-project", "legacy-session", time.time(), json.dumps(legacy)),
+        )
+    with TestClient(
+        create_app(tmp_path), cookies={"blueprints_session": "legacy-session"}
+    ) as client:
+        first = client.get("/api/projects/current").json()
+        second = client.get("/api/projects/legacy-project").json()
+        assert first["fileId"] == second["fileId"]
+        assert second["generatedSource"] == source
+        added = client.post(
+            "/api/projects/legacy-project/files",
+            json={"revision": 1, "path": "Helper.java", "source": "class Helper {}"},
+        )
+        assert added.status_code == 201, added.text
+    with TestClient(
+        create_app(tmp_path), cookies={"blueprints_session": "legacy-session"}
+    ) as restored:
+        after = restored.get("/api/projects/current").json()
+        assert after["fileId"] == first["fileId"]
+        assert len(after["files"]) == 2
+        assert after["originalSource"] == source
