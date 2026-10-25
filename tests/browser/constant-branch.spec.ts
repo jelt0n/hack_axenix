@@ -62,7 +62,7 @@ test('запоздалый предпросмотр не применяется 
   const gate=new Promise<void>(resolve=>{release=resolve;});
   let arrived!:()=>void;
   const received=new Promise<void>(resolve=>{arrived=resolve;});
-  await page.route('**/transformations/constant-branch/preview',async route=>{
+  await page.route('**/transformations/constant-branch/preview*',async route=>{
     const response=await route.fetch(); arrived(); await gate; await route.fulfill({response});
   });
   await page.getByRole('button',{name:'Предпросмотр упрощения',exact:true}).click();
@@ -83,7 +83,7 @@ test('восстановление старой проверки не затир
   const gate=new Promise<void>(resolve=>{release=resolve;});
   let arrived!:()=>void;
   const received=new Promise<void>(resolve=>{arrived=resolve;});
-  await page.route('**/checks/latest',async route=>{
+  await page.route('**/checks/latest*',async route=>{
     const response=await route.fetch(); arrived(); await gate; await route.fulfill({response});
   });
   await page.goto('/');
@@ -92,7 +92,7 @@ test('восстановление старой проверки не затир
   await page.getByRole('button',{name:'Предпросмотр упрощения',exact:true}).click();
   await page.getByRole('dialog',{name:'Предпросмотр упрощения'}).getByRole('button',{name:'Применить и проверить',exact:true}).click();
   await expect(page.getByTestId('check-status')).toHaveText('В очереди');
-  const response=page.waitForResponse(r=>r.url().endsWith('/checks/latest'));
+  const response=page.waitForResponse(r=>new URL(r.url()).pathname.endsWith('/checks/latest'));
   release(); await response;
   await page.evaluate(()=>new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve()))));
   await expect(page.getByTestId('check-status')).toHaveText('В очереди');

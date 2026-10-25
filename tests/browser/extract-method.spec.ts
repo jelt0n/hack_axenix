@@ -55,13 +55,13 @@ test('изменение имени во время запроса не откр
   const gate=new Promise<void>(resolve=>{release=resolve;});
   let arrived!:()=>void;
   const received=new Promise<void>(resolve=>{arrived=resolve;});
-  await page.route('**/transformations/extract-method/preview',async route=>{
+  await page.route('**/transformations/extract-method/preview*',async route=>{
     const response=await route.fetch();arrived();await gate;await route.fulfill({response});
   });
   await panel.getByRole('button',{name:'Предпросмотр выделения',exact:true}).click();
   await received;
   await panel.getByLabel('Имя нового метода').fill('anotherPart');
-  const response=page.waitForResponse(r=>r.url().endsWith('/extract-method/preview'));
+  const response=page.waitForResponse(r=>new URL(r.url()).pathname.endsWith('/extract-method/preview'));
   release();await response;
   await expect(page.getByRole('dialog',{name:'Предпросмотр выделения метода'})).toHaveCount(0);
   expect((await(await page.request.get('/api/projects/current')).json()).revision).toBe(1);
@@ -77,7 +77,7 @@ test('поздний конфликт предпросмотра старого 
   const gate=new Promise<void>(resolve=>{release=resolve;});
   let arrived!:()=>void;
   const received=new Promise<void>(resolve=>{arrived=resolve;});
-  await page.route('**/transformations/extract-method/preview',async route=>{
+  await page.route('**/transformations/extract-method/preview*',async route=>{
     const changed=await page.request.post(`/api/projects/${project.id}/source`,{data:{revision:1,source:source+'// other tab'}});
     expect(changed.status()).toBe(200);
     const response=await route.fetch();expect(response.status()).toBe(409);arrived();await gate;await route.fulfill({response});
@@ -86,7 +86,7 @@ test('поздний конфликт предпросмотра старого 
   await received;
   await upload.setInputFiles({name:'New.java',mimeType:'text/x-java-source',buffer:Buffer.from('class New { int run(int n){int x=n+1;return x;} }')});
   await expect(page.getByRole('heading',{name:'New.java'})).toBeVisible();
-  const reply=page.waitForResponse(r=>r.url().endsWith('/extract-method/preview'));
+  const reply=page.waitForResponse(r=>new URL(r.url()).pathname.endsWith('/extract-method/preview'));
   release();await reply;
   await page.evaluate(()=>new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve()))));
   await expect(page.getByText('Граф устарел',{exact:true})).toHaveCount(0);

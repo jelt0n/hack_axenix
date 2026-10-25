@@ -74,7 +74,7 @@ test('ответ правки графа сохраняет текст, введ
   let arrived!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
   const stored = new Promise<void>(resolve => { arrived = resolve; });
-  await page.route('**/api/projects/*/graph-edits', async route => {
+  await page.route('**/api/projects/*/graph-edits*', async route => {
     const response = await route.fetch();
     arrived(); await gate;
     await route.fulfill({ response });

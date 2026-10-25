@@ -4,9 +4,7 @@ import { api } from './api';
 import type { AutomaticCheck, CheckJob, ProgramResult, Project, Scenario } from './types';
 
 function entryPoint(project: Project): string {
-  const owners = [...new Set(project.methods.filter(method => method.name === 'main' && method.hasBody)
-    .map(method => (project.packageName ? project.packageName + '.' : '') + method.owner.replaceAll('.', '$')))];
-  return owners.length === 1 ? owners[0] : '';
+  return project.entryPoints.length === 1 ? project.entryPoints[0] : '';
 }
 
 function statusLabel(job: CheckJob | null): string {
@@ -35,6 +33,7 @@ export default function CheckPanel({ project, open, onToggle, pendingChanges = f
   project: Project; open: boolean; onToggle: () => void; pendingChanges?: boolean; automaticCheck?: AutomaticCheck | null;
 }) {
   const [scenarios, setScenarios] = useState<Scenario[]>([{ name: 'Сценарий 1', stdin: '' }]);
+  const [originalMainClass, setOriginalMainClass] = useState(project.originalEntryPoints.length === 1 ? project.originalEntryPoints[0] : '');
   const [mainClass, setMainClass] = useState(() => entryPoint(project));
   const [job, setJob] = useState<CheckJob | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -52,7 +51,7 @@ export default function CheckPanel({ project, open, onToggle, pendingChanges = f
   currentProject.current = project;
   const active = job?.status === 'queued' || job?.status === 'running';
   const stale = !!job && (pendingChanges || job.sourceRevision !== project.revision || job.projectId !== project.id
-    || job.mainClass !== mainClass || JSON.stringify(job.scenarios) !== JSON.stringify(scenarios));
+    || job.mainClass !== mainClass || (!!originalMainClass && job.originalMainClass !== originalMainClass) || JSON.stringify(job.scenarios) !== JSON.stringify(scenarios));
 
   useEffect(() => {
     let live = true;
@@ -61,6 +60,7 @@ export default function CheckPanel({ project, open, onToggle, pendingChanges = f
     displayedJobId.current = null;
     setJob(null); setError(null); setSending(false);
     setMainClass(entryPoint(project));
+    setOriginalMainClass(project.originalEntryPoints.length === 1 ? project.originalEntryPoints[0] : '');
     setScenarios([{ name: 'Сценарий 1', stdin: '' }]);
     api.latestCheck(project.id).then(latest => {
       if (!live || generation !== requestGeneration.current) return;
@@ -68,6 +68,7 @@ export default function CheckPanel({ project, open, onToggle, pendingChanges = f
       setJob(latest);
       if (!edited.current) {
         setScenarios(latest.scenarios);
+        setOriginalMainClass(latest.originalMainClass);
         setMainClass(latest.sourceRevision === currentProject.current.revision
           ? latest.mainClass : entryPoint(currentProject.current));
       }
@@ -117,7 +118,7 @@ export default function CheckPanel({ project, open, onToggle, pendingChanges = f
     edited.current = true;
     setSending(true); setError(null);
     try {
-      const next = await api.createCheck(project, scenarios, mainClass);
+      const next = await api.createCheck(project, scenarios, mainClass, originalMainClass);
       if (projectIdentity.current === project.id && generation === requestGeneration.current) {
         displayedJobId.current = next.id;
         setJob(next);
@@ -139,23 +140,25 @@ export default function CheckPanel({ project, open, onToggle, pendingChanges = f
     : job?.result?.verdict === 'different' ? 'different' : '';
   return <section className={`checks-panel ${open ? 'expanded' : ''}`} id="checks-panel" aria-label="Проверка поведения">
     <div className="checks-heading"><button className="checks-toggle" aria-expanded={open} onClick={onToggle}>
-      <FlaskConical size={17} /><strong>Проверка поведения</strong>{open ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+      <FlaskConical size={17} /><strong>Консоль · Проверка поведения</strong>{open ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
     </button><span className={`check-status ${tone}`} data-testid="check-status" aria-live="polite">
       {active ? <LoaderCircle size={12} className="spin" /> : job?.result?.verdict === 'matched' && !stale ? <Check size={12} /> : <Clock3 size={12} />}
       {stale ? pendingChanges || job?.sourceRevision !== project.revision ? 'Результат предыдущей версии' : 'Результат предыдущих входов' : statusLabel(job)}
     </span></div>
     {open && <div className="checks-body">
-      <div className="checks-form"><div className="checks-intro">Одинаковые входы для исходной и рабочей версий. Проверка относится к ревизии {project.revision}.</div>
+      <div className="checks-form"><div className="terminal-heading">JAVA CONSOLE · STDIN / STDOUT / STDERR</div><div className="checks-intro">Ввод задаётся перед запуском; вывод появится после выполнения. Одинаковые входы для исходной и рабочей версий. Проверка относится к ревизии {project.revision}.</div>
         <label className="check-entry">Класс с main<input value={mainClass} placeholder="com.example.Main" aria-label="Класс с main"
           onChange={event => { edited.current = true; setMainClass(event.target.value); }} /></label>
+        <label className="check-entry">Исходный класс с main<input value={originalMainClass} placeholder="Определить автоматически" aria-label="Исходный класс с main"
+          onChange={event => { edited.current = true; setOriginalMainClass(event.target.value); }} /></label>
         {scenarios.map((scenario, index) => <div className="scenario-form" key={index}>
           <div><input aria-label={`Имя сценария ${index + 1}`} value={scenario.name} maxLength={80}
             onChange={event => updateScenario(index, { name: event.target.value })} />
           {scenarios.length > 1 && <button className="icon-button" aria-label={`Удалить сценарий ${index + 1}`} onClick={() => {
             edited.current = true; setScenarios(items => items.filter((_, i) => i !== index));
           }}><X size={13} /></button>}</div>
-          <textarea aria-label={`Ввод сценария ${index + 1}`} placeholder="stdin · можно оставить пустым" value={scenario.stdin} maxLength={32768}
-            onChange={event => updateScenario(index, { stdin: event.target.value })} rows={3} />
+          <label className="stdin-label">STDIN · сценарий {index + 1}<textarea aria-label={`Ввод сценария ${index + 1}`} placeholder="stdin · можно оставить пустым" value={scenario.stdin} maxLength={32768}
+            onChange={event => updateScenario(index, { stdin: event.target.value })} rows={4} /></label>
         </div>)}
         <div className="scenario-actions"><button className="button secondary" disabled={scenarios.length >= 5} onClick={() => {
           edited.current = true; setScenarios(items => [...items, { name: `Сценарий ${items.length + 1}`, stdin: '' }]);
@@ -164,7 +167,7 @@ export default function CheckPanel({ project, open, onToggle, pendingChanges = f
             disabled={pendingChanges || sending || active || !mainClass.trim() || scenarios.some(s => !s.name.trim())}>
             {sending || active ? <LoaderCircle size={14} className="spin" /> : <Play size={14} />}Запустить проверку</button></div>
         <div className={`runner-availability ${available ? 'online' : ''}`}><i />{available ? 'Исполнитель готов' : 'Исполнитель недоступен. Задание останется в очереди.'}</div>
-        {pendingChanges && <div className="check-warning">Сначала сохраните код кнопкой «Обновить граф».</div>}
+        {pendingChanges && <div className="check-warning">Сохраните черновики файлов кнопкой «Обновить граф». Несохранённый файл нужно открыть в проводнике.</div>}
       </div>
       <div className="checks-output" data-testid="check-results">
         {error && <div className="check-error" role="alert"><AlertTriangle size={15} /><span>{error}</span></div>}

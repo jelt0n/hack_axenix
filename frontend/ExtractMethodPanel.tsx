@@ -35,7 +35,7 @@ export default function ExtractMethodPanel({project,graph,selected,disabled,onAp
       <label>Последняя операция<select aria-label="Последняя операция" value={endIndex} onChange={event=>setEnd(Number(event.target.value))}>
         {Array.from({length:count},(_,index)=><option key={index} value={index+1}>{label(index)}</option>)}</select></label>
       <button className="button secondary" disabled={busy||!methodName.trim()||startIndex>=endIndex||endIndex>count||!count}
-        onClick={()=>void prepare(()=>api.previewExtraction(project.id,project.revision,{methodId:graph!.methodId,startIndex,endIndex,methodName}))}>{busy?'Готовим…':'Предпросмотр выделения'}</button>
+        onClick={()=>void prepare(()=>api.previewExtraction(project.id,project.revision,{methodId:graph!.methodId,startIndex,endIndex,methodName}, project.fileId))}>{busy?'Готовим…':'Предпросмотр выделения'}</button>
     </fieldset>
     {error&&<p role="alert">{error}</p>}
     {preview&&valid&&!disabled&&<div role="dialog" aria-label="Предпросмотр выделения метода" className="branch-preview">
