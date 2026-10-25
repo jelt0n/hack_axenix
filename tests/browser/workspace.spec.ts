@@ -65,3 +65,10 @@ test('ошибка хранения черновика не позволяет �
   await page.getByRole('button',{name:'Обновить граф',exact:true}).click();
   await expect(page.getByRole('button',{name:'Открыть файл OrderCalculator.java',exact:true})).toBeEnabled();
 });
+
+test('ручное разделение монолита: все файлы исполняются вместе, правка соседнего файла обнаруживается',async({page})=>{
+  test.skip(!process.env.BLUEPRINTS_DOCKER_BIN,'Requires actual Java worker');
+  test.setTimeout(180000);
+  const { runWorkspaceDemo }=await import('./support/workspace-demo');
+  await withRealWorker(page.request,()=>runWorkspaceDemo(page));
+});

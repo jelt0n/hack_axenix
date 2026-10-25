@@ -77,6 +77,8 @@ def test_selected_file_edits_do_not_touch_siblings_and_are_private(tmp_path):
             "a\\B.java",
             "A.java.java",
             "Main.java/Helper.java",
+            "ж" * 126 + ".java",
+            "ж" * 130 + "/A.java",
         ]:
             assert (
                 client.post(url + "/files", json={"revision": 2, "path": path}).status_code == 422

@@ -90,7 +90,7 @@ export default function SourceView({ project, method, selection, blocks, onSelec
       <div className="panel-heading"><div><Code2 size={16} /><span>Java-код</span></div>
         <div className="source-tabs"><button className={!original ? 'active' : ''} onClick={() => onOriginal(false)}>Рабочий код</button>
           <button className={original ? 'active' : ''} onClick={() => onOriginal(true)}>Исходный</button></div></div>
-      <div className="source-path"><span>{packageName ? packageName.replaceAll('.', ' / ') + ' / ' : ''}{project.filename}</span>
+      <div className="source-path"><span>{packageName && !project.filename.includes('/') ? packageName.replaceAll('.', ' / ') + ' / ' : ''}{project.filename}</span>
         <span aria-label="Метод в окне кода" title={method?.signature}>{method?.signature ?? 'JAVA'}</span></div>
       {editing && !original ? <Suspense fallback={<div className="panel-empty">Загружаем редактор…</div>}>
         <CodeEditor source={source} onChange={onChange} range={highlightedRange} diagnostics={dirty ? [] : project.diagnostics} />

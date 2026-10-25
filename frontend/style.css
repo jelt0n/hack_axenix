@@ -1763,3 +1763,5 @@ a {
 .stdin-label textarea { display:block; width:100%; background:#172230; color:#d2e5da; border:1px solid #40536a; font:var(--text-code)/1.6 'IBM Plex Mono',monospace; }
 .stdin-label textarea::placeholder { color:#a7b9ca; }
 .folder-row { display:flex; align-items:center; gap:6px; width:100%; border:0; background:transparent; color:#5d6e83; padding-top:7px; padding-bottom:7px; font:inherit; font-size:var(--text-sm); cursor:pointer; }
+.file-explorer { flex-shrink:0; max-height:45vh; overflow:auto; }
+@media(max-width:600px) { .file-explorer { max-height:320px; } .file-explorer nav { display:block; } }

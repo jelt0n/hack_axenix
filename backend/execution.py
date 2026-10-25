@@ -199,7 +199,9 @@ class DockerExecutor:
             raise RunnerError("Некорректный размер снимка проекта")
         for path in files:
             if (
-                not path.endswith(".java")
+                len(path.encode("utf-8")) > 4096
+                or any(len(part.encode("utf-8")) > 255 for part in path.split("/"))
+                or not path.endswith(".java")
                 or path.startswith("/")
                 or "\\" in path
                 or any(p in ("", ".", "..") for p in path.split("/"))

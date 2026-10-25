@@ -28,7 +28,7 @@ class InvalidWorkspace(ValueError):
 def java_path(value: str) -> str:
     parts = value.split("/")
     if (
-        len(value) > 240
+        len(value.encode("utf-8")) > 240
         or not value.endswith(".java")
         or any(not part.isidentifier() for part in parts[:-1])
         or not parts[-1].removesuffix(".java").isidentifier()

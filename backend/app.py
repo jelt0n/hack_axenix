@@ -46,6 +46,8 @@ class ImportProject(BaseModel):
     def java_filename(cls, value: str) -> str:
         if not value.endswith(".java") or any(c in value for c in "/\\\r\n"):
             raise ValueError("Загрузите файл с расширением .java без пути к каталогу")
+        if len(value.encode("utf-8")) > 240:
+            raise ValueError("Имя файла превышает 240 байт UTF-8")
         if not value.isprintable():
             raise ValueError("Недопустимое имя файла")
         return value
