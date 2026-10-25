@@ -29,7 +29,7 @@ export default function CodeEditor({ source, onChange, range, diagnostics }: {
     const model = monaco.editor.createModel(props.current.source, 'java');
     const instance = monaco.editor.create(container.current!, {
       model, theme: 'blueprints', ariaLabel: 'Рабочая версия Java', automaticLayout: true,
-      minimap: { enabled: false }, fontSize: 12, lineHeight: 24, tabSize: 4,
+      minimap: { enabled: false }, fontSize: 15, lineHeight: 24, tabSize: 4,
       scrollBeyondLastLine: false, padding: { top: 18, bottom: 18 },
       wordWrap: 'off', quickSuggestions: false, suggestOnTriggerCharacters: false,
       editContext: false,

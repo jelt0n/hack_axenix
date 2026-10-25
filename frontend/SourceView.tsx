@@ -96,7 +96,7 @@ export default function SourceView({ project, method, selection, blocks, onSelec
         <CodeEditor source={source} onChange={onChange} range={highlightedRange} diagnostics={dirty ? [] : project.diagnostics} />
       </Suspense> : <div className="source-scroll" ref={viewport} tabIndex={0} aria-label="Код программы"
         onScroll={event => setScrollTop(event.currentTarget.scrollTop)}>
-        <div className="source-lines" style={{ height: lines.length * LINE_HEIGHT, minWidth: widest * 7 + 90 }}>
+        <div className="source-lines" style={{ height: lines.length * LINE_HEIGHT, minWidth: `calc(${widest}ch + 90px)` }}>
           <div style={{ height: first * LINE_HEIGHT }} aria-hidden="true" />
           {lines.slice(first, last).map((line, index) => { const i = first + index; return <div key={i} data-testid={`source-line-${i + 1}`}
           className={`source-line ${highlightedRange && i + 1 >= highlightedRange.startLine && i + 1 <= highlightedRange.endLine ? 'highlighted' : ''}`}
