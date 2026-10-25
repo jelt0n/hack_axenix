@@ -42,7 +42,7 @@ test('запоздалый ответ анализа не становится �
   const gate = new Promise<void>(resolve => { release = resolve; });
   let arrived!: () => void;
   const arrivedResponse = new Promise<void>(resolve => { arrived = resolve; });
-  await page.route('**/analysis', async route => {
+  await page.route('**/analysis*', async route => {
     const response = await route.fetch();
     arrived();
     await gate;
