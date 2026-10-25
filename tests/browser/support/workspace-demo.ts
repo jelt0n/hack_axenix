@@ -42,8 +42,14 @@ export async function runWorkspaceDemo(page: Page) {
   const downloaded=page.waitForEvent('download');
   await page.getByRole('link',{name:'Скачать проект ZIP'}).click();
   expect((await downloaded).suggestedFilename()).toBe('java-project.zip');
+  await page.getByRole('button',{name:'Открыть консоль',exact:true}).click();
+  await expect(page.getByTestId('check-status')).toContainText('Есть различия');
+  await page.locator('#checks-panel').screenshot({path:'.cache/screenshots/workspace-console.png'});
   await page.screenshot({path:'.cache/screenshots/workspace-demo.png',fullPage:true});
   await page.setViewportSize({width:390,height:844});
+  await expect(page.getByRole('button',{name:'Открыть файл Main.java',exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Открыть файл Main.java',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'Main.java',exact:true})).toBeVisible();
   await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth)).toBe(390);
   await page.screenshot({path:'.cache/screenshots/workspace-demo-mobile.png',fullPage:true});
 }

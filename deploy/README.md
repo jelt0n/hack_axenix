@@ -182,7 +182,7 @@ docker run --rm --pull never --network none --read-only --user 0:0 \
   -v /opt/blueprints/backups/BEFORE_COMMIT:/backup:ro \
   --entrypoint python OLD_API_IMAGE_ID -c '
 from pathlib import Path
-import shutil, tarfile
+import os, shutil, tarfile
 root = Path("/data")
 archive = Path("/backup/projects.tar.gz")
 with tarfile.open(archive) as saved:
@@ -195,8 +195,15 @@ with tarfile.open(archive) as saved:
             shutil.rmtree(path)
         else:
             path.unlink()
-    saved.extractall(root, filter="data")'
+    saved.extractall(root, filter="data")
+os.chown(root, 1000, 1000)
+for path in root.rglob("*"):
+    os.chown(path, 1000, 1000)'
 ```
+
+Владельцем восстановленного тома и файлов должен быть UID/GID `1000:1000`,
+под которым запускаются API и worker. Перед настоящим откатом проверьте восстановление
+в отдельный тестовый том и чтение/запись прежним приложением под этим пользователем.
 
 5. Запустите старый комплект `up -d --no-build --pull never --wait` с его
    `runtime.env` и существующим `operator.env`. Проверьте health, runner и проект.
